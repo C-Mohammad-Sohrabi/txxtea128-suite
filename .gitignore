@@ -4,7 +4,7 @@ example/CMakeFiles/*
 *.cmake
 *.out
 *.a
-Makefile
+example/Makefile
 example/main
 install_manifest.txt
 *.dylib
@@ -14,3 +14,19 @@ install_manifest.txt
 Debug
 *.sln
 *.lib
+
+# built binaries (root bench + menu + variant benches/demos)
+/bench
+/menu
+bench_a
+bench_b
+bench_c
+bench_etm
+bench_etm_ctx
+bench_g
+demo_etm
+demo_aad
+*.exe
+
+# local app metadata
+.freebuff/
