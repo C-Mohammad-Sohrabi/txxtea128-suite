@@ -1,0 +1,17 @@
+project(main)
+cmake_minimum_required(VERSION 2.8.12)
+aux_source_directory(. DIR_SRCS)
+add_executable(main ${DIR_SRCS})
+find_path(LIBXXTEA_HEADER xxtea.h)
+include_directories(${LIBXXTEA_HEADER})
+find_library(
+   LIBXXTEA_STATIC_LIBRARIES NAMES libxxtea.a
+)
+if(LIBXXTEA_STATIC_LIBRARIES)
+    target_link_libraries(main ${LIBXXTEA_STATIC_LIBRARIES})
+else(LIBXXTEA_STATIC_LIBRARIES)
+    find_library(
+       LIBXXTEA_LIBRARIES NAMES xxtea
+    )
+    target_link_libraries(main ${LIBXXTEA_LIBRARIES})
+endif(LIBXXTEA_STATIC_LIBRARIES)
