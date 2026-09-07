@@ -4,7 +4,7 @@
     <img src="https://avatars1.githubusercontent.com/u/6683159?v=3&s=86" alt="XXTEA logo" title="XXTEA" align="right" />
 </a>
 
-## Introductio
+## Introduction
 xxtea128-suite is an experimental C research suite exploring XXTEA-derived
 fixed-block, tweakable, and authenticated-encryption constructions.
 
