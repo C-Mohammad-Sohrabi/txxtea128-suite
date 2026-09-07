@@ -1,4 +1,4 @@
-# xxtea128-suite
+# txxtea128-suite
 
 <a href="https://github.com/xxtea/">
     <img src="https://avatars1.githubusercontent.com/u/6683159?v=3&s=86" alt="XXTEA logo" title="XXTEA" align="right" />
@@ -33,7 +33,7 @@ part of the upstream project.
 ## Installation
 
 ```sh
-git clone https://github.com/xxtea/xxtea-c.git
+git clone https://github.com/C-Mohammad-Sohrabi/txxtea128-suite.git
 cmake .
 make
 make install
