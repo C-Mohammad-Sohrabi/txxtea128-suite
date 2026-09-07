@@ -1,19 +1,35 @@
-# XXTEA for C
+# xxtea128-suite
 
 <a href="https://github.com/xxtea/">
     <img src="https://avatars1.githubusercontent.com/u/6683159?v=3&s=86" alt="XXTEA logo" title="XXTEA" align="right" />
 </a>
 
-## Introduction
-
+## Introductio
 xxtea128-suite is an experimental C research suite exploring XXTEA-derived
 fixed-block, tweakable, and authenticated-encryption constructions.
 
 It is intended for academic evaluation, benchmarking, and design exploration,
 not for production cryptography.
 
-It is different from the original XXTEA encryption algorithm. It encrypts and decrypts raw binary data instead of 32bit integer array, and the key is also the raw binary data.
+> Warning: This project is experimental and has not been reviewed by
+> independent cryptanalysts. Do not use it to protect real-world data.
 
+## Acknowledgements
+
+This project was inspired by the upstream `xxtea-c` project and related
+XXTEA implementations. The constructions and experimental variants in this
+repository are independent research work and should not be interpreted as
+part of the upstream project.
+
+## Security Notes
+
+- Experimental construction
+- Not reviewed by external cryptanalysts
+- Do not use for production security
+- Prefer standardized AEAD schemes such as AES-GCM or ChaCha20-Poly1305
+  for real-world applications
+
+# Build
 ## Installation
 
 ```sh
