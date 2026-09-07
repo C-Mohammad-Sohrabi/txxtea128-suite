@@ -6,7 +6,11 @@
 
 ## Introduction
 
-XXTEA is a fast and secure encryption algorithm. This is a XXTEA library for C.
+xxtea128-suite is an experimental C research suite exploring XXTEA-derived
+fixed-block, tweakable, and authenticated-encryption constructions.
+
+It is intended for academic evaluation, benchmarking, and design exploration,
+not for production cryptography.
 
 It is different from the original XXTEA encryption algorithm. It encrypts and decrypts raw binary data instead of 32bit integer array, and the key is also the raw binary data.
 
