@@ -1,18 +1,29 @@
-CC ?= cc
-CFLAGS ?= -O2 -Wall -Wextra
-PYTHON ?= python3
-.PHONY: all test test-sanitize run clean
-all: bench example/xxtea_example
-bench: src/bench.c src/xxtea.c include/xxtea.h include/crypto_util.h
-	$(CC) $(CFLAGS) -Iinclude -o $@ src/bench.c src/xxtea.c
-example/xxtea_example: example/test.c example/base64.c example/base64.h src/xxtea.c include/xxtea.h include/crypto_util.h
-	$(CC) $(CFLAGS) -I. -Iinclude -o $@ example/test.c example/base64.c src/xxtea.c
+# variant_A — XXTEA-128 as a fixed 16-byte block cipher, run in CTR mode
+#
+# Targets: all (default), run, clean
+# Works on Linux, macOS and Windows (MSYS2/MinGW).
+
+CC      ?= cc
+CFLAGS  ?= -O2 -Wall -Wextra
+
+TARGET := bench_a
+SRCS   := src/xxtea128.c src/bench_a.c
+HDRS   := include/crypto_util.h include/xxtea128.h
+
+all: $(TARGET)
+
+$(TARGET): $(SRCS) $(HDRS)
+	$(CC) $(CFLAGS) -o $@ $(SRCS)
+
 run: all
-	./example/xxtea_example
-	./bench
+	./$(TARGET)
+
+clean:
+	rm -f $(TARGET) *.o
+
+PYTHON ?= python3
+.PHONY: all run clean test test-sanitize
 test:
 	$(PYTHON) tests/run_tests.py
 test-sanitize:
 	$(PYTHON) tests/run_tests.py --sanitize
-clean:
-	rm -f bench example/xxtea_example *.o
