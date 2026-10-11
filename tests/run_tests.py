@@ -22,12 +22,12 @@ parser.add_argument('--sanitize', action='store_true')
 args = parser.parse_args()
 cc = shlex.split(os.environ.get('CC', 'cc'))
 flags = shlex.split(os.environ.get('CFLAGS', '-O2 -Wall -Wextra -Werror'))
-stems = dict(A='src/xxtea128', B='src/txxtea128', C='src/txxtea128_rs', D='src/txxtea128', E='src/txxtea128', F='src/txxtea128', G='src/txxtea128_h')
-wrappers = dict(D='src/txxtea_etm', E='src/txxtea_etm_ctx', F='src/txxtea_etm_aad')
-sources = ['src/xxtea.c'] if PROJECT == 'original' else [stems[PROJECT] + '.c']
+stems = dict(A='xxtea128', B='txxtea128', C='txxtea128_rs', D='txxtea128', E='txxtea128', F='txxtea128', G='txxtea128_h')
+wrappers = dict(D='txxtea_etm', E='txxtea_etm_ctx', F='txxtea_etm_aad')
+sources = ['src/xxtea.c'] if PROJECT == 'original' else ['src/' + stems[PROJECT] + '.c']
 openssl = []
 if PROJECT in wrappers:
-    sources.append(wrappers[PROJECT] + '.c')
+    sources.append('src/' + wrappers[PROJECT] + '.c')
     try:
         openssl = shlex.split(subprocess.check_output(
             ['pkg-config', '--cflags', '--libs', 'openssl'], text=True,
@@ -210,7 +210,7 @@ def test_envelope(lib):
 with tempfile.TemporaryDirectory(prefix='xxtea-project-') as temp:
     temp = Path(temp)
     target = temp / ('project.dylib' if sys.platform == 'darwin' else 'project.so')
-    subprocess.run(cc + flags + ['-shared', '-fPIC'] + sources + openssl + ['-o', str(target)], check=True)
+    subprocess.run(cc + flags + ['-shared', '-fPIC', '-Iinclude'] + sources + openssl + ['-o', str(target)], check=True)
     library = C.CDLL(str(target))
     if PROJECT == 'original':
         test_original(library)

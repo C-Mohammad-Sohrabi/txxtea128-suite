@@ -1,27 +1,107 @@
-# XXTEA · original C library
+# Variant D · Encrypt-then-MAC · allocating API
 
-Variable-length **Corrected Block TEA**, with a 128-bit key and a byte API
-that stores the original message length. This is the original algorithm
-with reviewed input validation and memory handling; the research variants
-live in their own tags.
-
-## Quick start
+**Standalone tag `D`** · C implementation · Research project
 
 ```sh
-git clone https://github.com/C-Mohammad-Sohrabi/txxtea128-suite.git
-cd txxtea128-suite
+git clone --branch D --single-branch https://github.com/C-Mohammad-Sohrabi/txxtea128-suite.git variant-D
+cd variant-D
 make
 make test
 make test-sanitize
-./bench
-./example/xxtea_example
 ```
 
-Requires a C11-capable C compiler and Make. Tests additionally require
-Python 3; **OpenSSL is not needed** for this project. ASan/UBSan needs a
-compiler that supports those sanitizers.
+This checkout includes only variant D's runtime sources and its local
+helpers. No sibling project or original-library checkout is needed. Building
+requires Make and a C11 compiler; tests also need Python 3. ASan/UBSan requires
+a supporting compiler. OpenSSL libcrypto is required.
 
-## CMake
+
+A complete **symmetric authenticated-encryption** API: encrypts with the tweakable XXTEA-128
+cipher in CTR mode and authenticates the result with **HMAC-SHA256**.
+
+**Construction (Encrypt-then-MAC):**
+
+- 32-byte master key → key separation via HMAC KDF:
+  `enc_key = HMAC(master, "enc")[0..15]`, `mac_key = HMAC(master, "mac")`
+- nonce: **12 random bytes from the OS CSPRNG** (`getrandom` on Linux,
+  OpenSSL `RAND_bytes` on macOS/Windows)
+- output format: `"TX1" + version + nonce12 + ct_len_le32 + ciphertext + tag`
+- tag = `HMAC-SHA256(mac_key, header || ciphertext)`, verified with a
+  **constant-time compare** before any decryption happens
+
+> ⚠️ **Security status:** the ETM + HMAC construction is sound practice
+> (tamper detection before decryption, key separation, constant-time tag
+> check), but the underlying cipher is the experimental variant B — not a
+> vetted cipher. No production-security claim is made for this construction.
+
+## Files
+
+| File             | Purpose                                        |
+|------------------|------------------------------------------------|
+| `txxtea_etm.h`   | Public API (`seal` / `open`)                   |
+| `txxtea_etm.c`   | ETM implementation (needs libcrypto)           |
+| `txxtea128.c/h`  | Embedded cipher (copy of variant B)            |
+| `bench_etm.c`    | Benchmark (seal/open ns per size)              |
+| `demo_etm.c`     | Demo incl. tamper-detection test               |
+| `Makefile`       | Build (Linux / macOS / Windows-MinGW)          |
+
+## Requirements
+
+OpenSSL **libcrypto** (for HMAC, constant-time compare, RNG):
+
+- Debian/Ubuntu: `sudo apt install libssl-dev`
+- Fedora: `sudo dnf install openssl-devel`
+- macOS: `brew install openssl`
+- Windows: install OpenSSL for MinGW (or use MSYS2 `pacman -S mingw-w64-x86_64-openssl`)
+
+## Build
+
+```sh
+make          # builds bench_etm + demo_etm
+make run      # runs both
+make clean
+```
+
+The Makefile auto-detects OpenSSL via `pkg-config` and falls back to
+common Homebrew paths on macOS. Windows (cmd.exe, MinGW gcc on PATH):
+
+```
+gcc -O2 -Wall -Wextra -Ic:\path\to\openssl\include -o bench_etm.exe txxtea128.c txxtea_etm.c bench_etm.c -Lc:\path\to\openssl\lib\MinGW -lcrypto
+```
+
+## API
+
+```c
+#include "txxtea_etm.h"
+
+// Seal (encrypt + authenticate). Allocates *out — caller frees it.
+// Returns 1 on success, 0 on failure.
+int txxtea_etm_seal(const uint8_t *pt, size_t pt_len,
+                    const uint8_t master_key[32],
+                    uint8_t **out, size_t *out_len);
+
+// Open (verify tag, then decrypt). Allocates *pt — caller frees it.
+// Returns 1 only if the tag is valid; tampered input is rejected.
+int txxtea_etm_open(const uint8_t *in, size_t in_len,
+                    const uint8_t master_key[32],
+                    uint8_t **pt, size_t *pt_len);
+```
+
+**Usage notes:** nonce is generated internally — safe defaults, but you
+relinquish control over nonce management. If you need caller-supplied
+nonces or zero-allocation operation, use variant E; for associated-data
+binding, use variant F.
+
+## How it differs from the other variants
+
+- **vs A/B/C:** raw ciphers with no authentication — tampering is undetectable.
+- **vs E:** same cryptography, but E is context-based (precomputed keys,
+  caller nonce + buffers, no malloc).
+- **vs F:** F adds Associated Data (AAD) and uses the same ctx-based API.
+- **vs G:** G is a cipher-only redesign (redesigned, unvetted core, no authentication
+  layer); using G requires adapting the called function/header and assigning a new envelope identifier; it changes ciphertext compatibility.
+
+## Standalone CMake build
 
 ```sh
 cmake -S . -B build
@@ -30,52 +110,26 @@ ctest --test-dir build --output-on-failure
 cmake --install build --prefix ./build/install
 ```
 
-The build produces shared/static `xxtea` libraries, a benchmark and the
-example. The public header is `xxtea.h`; `crypto_util.h` is an internal
-source dependency. CTest runs the example and, when Python is available,
-the independent reference tests. Source archives build without `.git`.
+## Verification and API contracts
 
-## API and compatibility
+`tests/` compares the C implementation with an independent Python reference
+and frozen project vectors. `make test-sanitize` adds instrumented C execution.
+These are functional tests, not official third-party vectors or a security
+proof. Native Windows, 32-bit and big-endian execution are not claimed.
 
-- `xxtea_encrypt` / `xxtea_decrypt` preserve historical string-key behavior:
-  stop at the first NUL and pad to 16 bytes. A short terminated string is safe.
-- `xxtea_encrypt_raw` / `xxtea_decrypt_raw` consume **exactly 16 readable
-  key bytes**, including zeros. Use these for binary keys.
-- Successful calls allocate a buffer; the caller must `free()` it. Output
-  lengths are byte counts. Failure returns `NULL` and zeros a supplied length.
-- Empty plaintext is unsupported by this envelope. Ciphertext must be at
-  least 8 bytes and divisible by 4. Invalid lengths and overflow are rejected.
-- Old ciphertext produced using string-key truncation still needs the legacy
-  API. There is no automatic conversion from truncated to binary keys.
+Stream calls return 1/0 and reject invalid input before writing. Every stream
+call restarts the counter: never reuse a key/nonce pair, including by splitting
+one message across calls. Low-level block calls require valid 16-byte buffers
+and support exact in-place operation. Other partial overlap is unsupported.
 
-```c
-#include <stdint.h>
-#include <stdlib.h>
-#include "xxtea.h"
+Packets have a 32-bit plaintext-length field. Outputs and lengths must follow
+the public header contract; on errors supplied lengths are reset to zero.
+Authentication is checked before releasing plaintext. D/E/F use the same B
+core and derived encryption keys: never reuse a master-key/nonce pair across
+these formats. TX1 carries a 20-byte header and a 32-byte tag; TX2 carries a
+24-byte header, clear authenticated AAD and a 32-byte tag.
 
-int main(void) {
-    const uint8_t key[16] = {0}; /* fixed example key only */
-    const char message[] = "hello";
-    size_t size = 0;
-    void *ciphertext = xxtea_encrypt_raw(message, sizeof(message) - 1, key, &size);
-    if (!ciphertext) return 1;
-    free(ciphertext);
-    return 0;
-}
-```
-
-## Files and verification
-
-`xxtea.c` / `xxtea.h` implement the library; `example/` provides Base64 and a
-round-trip program; `bench.c` measures execution; `tests/` contains the
-independent reference, failure injection and sanitizer checks. See
-[CHANGELOG.md](CHANGELOG.md) for the reviewed fixes and API migration notes.
-
-The algorithm here does not authenticate messages. Successful functional
-checks do not prove cryptanalytic security or establish production suitability.
-Native Windows, 32-bit, big-endian and embedded execution were not part of
-the recorded macOS/ARM64 verification. Modern MinGW users can use
-`build_windows.bat`; the script is provided but was not executed on Windows.
+See [CHANGELOG.md](CHANGELOG.md) for changes and migration notes.
 
 ## Explore the family
 
@@ -86,8 +140,6 @@ variants, not security levels. [archive/suite](https://github.com/C-Mohammad-Soh
 keeps the reviewed aggregate project and interoperability tests. The old
 `v0.1.0`–`v0.9.0` tags remain unchanged historical milestones.
 
-## Attribution
+## License
 
-Based on `xxtea-c`, with the original algorithm and author notices retained.
-See [LICENSE.md](LICENSE.md). The experimental variants are separate research
-work; they are not upstream XXTEA releases.
+See [LICENSE.md](LICENSE.md); original source attributions are retained.
