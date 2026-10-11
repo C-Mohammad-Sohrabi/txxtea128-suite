@@ -210,12 +210,12 @@ def test_envelope(lib):
 with tempfile.TemporaryDirectory(prefix='xxtea-project-') as temp:
     temp = Path(temp)
     target = temp / ('project.dylib' if sys.platform == 'darwin' else 'project.so')
-    subprocess.run(cc + flags + ['-shared', '-fPIC'] + sources + openssl + ['-o', str(target)], check=True)
+    subprocess.run(cc + flags + ['-shared', '-fPIC', '-Iinclude'] + sources + openssl + ['-o', str(target)], check=True)
     library = C.CDLL(str(target))
     if PROJECT == 'original':
         test_original(library)
         fault = temp / 'allocation_failures'
-        subprocess.run(cc + flags + (['-fsanitize=address,undefined'] if args.sanitize else []) + ['tests/allocation_failures.c', '-o', str(fault)], check=True)
+        subprocess.run(cc + flags + ['-Iinclude'] + (['-fsanitize=address,undefined'] if args.sanitize else []) + ['tests/allocation_failures.c', '-o', str(fault)], check=True)
         subprocess.run([str(fault)], check=True)
     else:
         test_core(library)
@@ -224,8 +224,10 @@ with tempfile.TemporaryDirectory(prefix='xxtea-project-') as temp:
     if args.sanitize:
         driver = temp / 'sanitizer'
         extra = ['example/base64.c'] if PROJECT == 'original' else []
-        subprocess.run(cc + ['-O1', '-g', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
-                       '-fno-omit-frame-pointer', '-Iinclude', '-DPROJECT_' + PROJECT.upper(),
-                       'tests/sanitize.c'] + sources + extra + openssl + ['-o', str(driver)], check=True)
+        sanitize_flags = ['-O1', '-g', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
+                       '-fno-omit-frame-pointer', '-Iinclude', '-DPROJECT_' + PROJECT.upper()]
+        if PROJECT == 'original':
+            sanitize_flags.append('-I.')
+        subprocess.run(cc + sanitize_flags + ['tests/sanitize.c'] + sources + extra + openssl + ['-o', str(driver)], check=True)
         subprocess.run([str(driver)], check=True, env={**os.environ, 'UBSAN_OPTIONS': 'halt_on_error=1'})
 print(f'PASS: {PROJECT}, {checks} assertions, sanitizer={args.sanitize}')
