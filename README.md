@@ -1,145 +1,93 @@
-# txxtea128-suite
+# XXTEA · original C library
 
-<a href="https://github.com/xxtea/">
-    <img src="https://avatars1.githubusercontent.com/u/6683159?v=3&s=86" alt="XXTEA logo" title="XXTEA" align="right" />
-</a>
+Variable-length **Corrected Block TEA**, with a 128-bit key and a byte API
+that stores the original message length. This is the original algorithm
+with reviewed input validation and memory handling; the research variants
+live in their own tags.
 
-## Introduction
-xxtea128-suite is an experimental C research suite exploring XXTEA-derived
-fixed-block, tweakable, and authenticated-encryption constructions.
-
-It is intended for academic evaluation, benchmarking, and design exploration,
-not for production cryptography.
-
-> Warning: This project is experimental and has not been reviewed by
-> independent cryptanalysts. Do not use it to protect real-world data.
-
-## Acknowledgements
-
-This project was inspired by the upstream `xxtea-c` project and related
-XXTEA implementations. The constructions and experimental variants in this
-repository are independent research work and should not be interpreted as
-part of the upstream project.
-
-## Security Notes
-
-- Experimental construction
-- Not reviewed by external cryptanalysts
-- Do not use for production security
-- Prefer standardized AEAD schemes such as AES-GCM or ChaCha20-Poly1305
-  for real-world applications
-
-# Build
-## Installation
+## Quick start
 
 ```sh
 git clone https://github.com/C-Mohammad-Sohrabi/txxtea128-suite.git
-cmake .
+cd txxtea128-suite
 make
-make install
+make test
+make test-sanitize
+./bench
+./example/xxtea_example
 ```
 
-## Usage
+Requires a C11-capable C compiler and Make. Tests additionally require
+Python 3; **OpenSSL is not needed** for this project. ASan/UBSan needs a
+compiler that supports those sanitizers.
+
+## CMake
+
+```sh
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+cmake --install build --prefix ./build/install
+```
+
+The build produces shared/static `xxtea` libraries, a benchmark and the
+example. The public header is `xxtea.h`; `crypto_util.h` is an internal
+source dependency. CTest runs the example and, when Python is available,
+the independent reference tests. Source archives build without `.git`.
+
+## API and compatibility
+
+- `xxtea_encrypt` / `xxtea_decrypt` preserve historical string-key behavior:
+  stop at the first NUL and pad to 16 bytes. A short terminated string is safe.
+- `xxtea_encrypt_raw` / `xxtea_decrypt_raw` consume **exactly 16 readable
+  key bytes**, including zeros. Use these for binary keys.
+- Successful calls allocate a buffer; the caller must `free()` it. Output
+  lengths are byte counts. Failure returns `NULL` and zeros a supplied length.
+- Empty plaintext is unsupported by this envelope. Ciphertext must be at
+  least 8 bytes and divisible by 4. Invalid lengths and overflow are rejected.
+- Old ciphertext produced using string-key truncation still needs the legacy
+  API. There is no automatic conversion from truncated to binary keys.
 
 ```c
-#include <stdio.h>
-#include <string.h>
-#include <xxtea.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include "xxtea.h"
 
-int main() {
-    const char *text = "Hello World! 你好，中国！";
-    const char *key = "1234567890";
-    size_t len;
-    unsigned char *encrypt_data = xxtea_encrypt(text, strlen(text), key, &len);
-    char *decrypt_data = xxtea_decrypt(encrypt_data, len, key, &len);
-    if (strncmp(text, decrypt_data, len) == 0) {
-        printf("success!\n");
-    }
-    else {
-        printf("fail!\n");
-    }
-    free(encrypt_data);
-    free(decrypt_data);
+int main(void) {
+    const uint8_t key[16] = {0}; /* fixed example key only */
+    const char message[] = "hello";
+    size_t size = 0;
+    void *ciphertext = xxtea_encrypt_raw(message, sizeof(message) - 1, key, &size);
+    if (!ciphertext) return 1;
+    free(ciphertext);
     return 0;
 }
 ```
 
-## Variants (experimental playground)
+## Files and verification
 
-The `variants/variant_A` … `variants/variant_G` folders reshape XXTEA
-into a fixed 128-bit block cipher, run it in CTR mode, and (D/E/F) wrap
-it in authenticated encryption. Each folder has its own README, Makefile and benchmark; the cipher sources
-also use the shared root `crypto_util.h`. Standalone tags bundle that helper. Build everything (or one)
-with:
+`xxtea.c` / `xxtea.h` implement the library; `example/` provides Base64 and a
+round-trip program; `bench.c` measures execution; `tests/` contains the
+independent reference, failure injection and sanitizer checks. See
+[CHANGELOG.md](CHANGELOG.md) for the reviewed fixes and API migration notes.
 
-```sh
-make all            # build root bench + every variant + the test menu
-make variant_G      # build one variant
-make VARIANT=F      # same, by name
-make menu           # build the interactive test menu
-./menu              # pick a component and run its self-test
-make run            # build + run every benchmark/demo
-```
+The algorithm here does not authenticate messages. Successful functional
+checks do not prove cryptanalytic security or establish production suitability.
+Native Windows, 32-bit, big-endian and embedded execution were not part of
+the recorded macOS/ARM64 verification. Modern MinGW users can use
+`build_windows.bat`; the script is provided but was not executed on Windows.
 
-Windows users: run `build_windows.bat` (needs MinGW-w64 gcc; variants
-D/E/F also need OpenSSL).
+## Explore the family
 
-**Releases (tags)** — the suite grows one milestone at a time; each tag
-is a self-contained snapshot you can check out and build on its own:
+[Original XXTEA (main)](https://github.com/C-Mohammad-Sohrabi/txxtea128-suite/tree/main) · [A](https://github.com/C-Mohammad-Sohrabi/txxtea128-suite/tree/A) · [B](https://github.com/C-Mohammad-Sohrabi/txxtea128-suite/tree/B) · [C](https://github.com/C-Mohammad-Sohrabi/txxtea128-suite/tree/C) · [D](https://github.com/C-Mohammad-Sohrabi/txxtea128-suite/tree/D) · [E](https://github.com/C-Mohammad-Sohrabi/txxtea128-suite/tree/E) · [F](https://github.com/C-Mohammad-Sohrabi/txxtea128-suite/tree/F) · [G](https://github.com/C-Mohammad-Sohrabi/txxtea128-suite/tree/G)
 
-| Tag | Contents |
-|---|---|
-| `v0.1.0` | Original XXTEA library + benchmark |
-| `v0.2.0` | + variant A (XXTEA-128 block cipher, CTR) |
-| `v0.3.0` | + variant B (tweakable) |
-| `v0.4.0` | + variant C (round-key schedule) |
-| `v0.5.0` | + variant D (Encrypt-then-MAC) |
-| `v0.6.0` | + variant E (ETM, context API) |
-| `v0.7.0` | + variant F (ETM + AAD) |
-| `v0.8.0` | + variant G (hardened cipher) |
-| `v0.9.0` | Aggregate build + Windows script + test menu |
+Each A–G tag is a standalone source tree. The letters identify research
+variants, not security levels. [archive/suite](https://github.com/C-Mohammad-Sohrabi/txxtea128-suite/tree/archive/suite)
+keeps the reviewed aggregate project and interoperability tests. The old
+`v0.1.0`–`v0.9.0` tags remain unchanged historical milestones.
 
-The letters describe different structures, not an established security
-ranking. B injects its tweak inside each MX update; C retains that path and
-adds a schedule; D/E/F use B, while G is a separate core.
+## Attribution
 
-## Verified implementation and API contracts (2026-10-10)
-
-Run `make test` for the independent Python reference, frozen known-answer
-vectors, all seven variants, D/E interoperability and authenticated envelope
-negative tests. Run `make test-sanitize` to also run the C memory/UB checks.
-The tests require Python 3, a C compiler, and real OpenSSL libcrypto.
-`make -B all` rebuilds all demos; CMake builds the base library and example.
-
-The original `xxtea_encrypt` / `xxtea_decrypt` retain historical **string-key**
-semantics (stop at the first NUL, zero-pad to 16 bytes). Use the new
-`xxtea_encrypt_raw` / `xxtea_decrypt_raw` for exactly 16 binary key bytes.
-Old ciphertext produced by truncated binary keys must still be opened with
-the legacy API; changing to raw keys changes that ciphertext. No auto-detection
-is safe. All base API errors return NULL and set a supplied output length to 0.
-Empty messages are unsupported by the base envelope, but supported by D/E/F.
-
-All variant `*_ctr_xor` functions now return 1/0; callers must check the result.
-They reject more than 2^32 counter blocks (2^36 bytes) before touching data.
-Each call restarts the counter: this is a one-shot API, not a streaming update.
-A key/nonce pair must not be reused, including across D/E/F formats, because
-these wrappers derive the same encryption key. The limit is a counter-space
-bound, not a certified safe per-key data volume. Existing callers that ignore
-the return value compile, but must be updated to handle failures.
-
-D/E/F keep their wire formats. Output lengths are reset on failure. E/F
-require disjoint input/output/context/nonce/length storage; block APIs support
-exact in-place operation. `txxtea_etm_ctx_clear` and
-`txxtea_etm_aad_ctx_clear` erase reusable key material. E/F do not allocate
-message buffers themselves; OpenSSL can allocate internally. For integration,
-link just one copy of the identical B/D/E/F `txxtea128.c` core, not four.
-G is a separate research branch, not the core currently used in D/E/F.
-
-Passing these correctness tests is not a cryptanalytic security proof or
-constant-time audit. Native 32-bit, Windows, big-endian and embedded targets
-have not been executed in this review. Personal Word documents are excluded
-from version control.
-
-F constants now use the `TXXTEA_AAD_` prefix (for example
-`TXXTEA_AAD_HEADER_LEN`), so E and F headers can coexist without conflicting
-20/24-byte header macros. Update old F callers that used the generic macros.
+Based on `xxtea-c`, with the original algorithm and author notices retained.
+See [LICENSE.md](LICENSE.md). The experimental variants are separate research
+work; they are not upstream XXTEA releases.

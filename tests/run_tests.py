@@ -1,170 +1,231 @@
 #!/usr/bin/env python3
-"""Reproducible correctness tests against Python specifications and real libcrypto."""
-import argparse, ctypes as C, hashlib, hmac, json, os, platform, random, shlex, shutil, struct, subprocess, sys, tempfile
+"""Build and validate the single project selected by PROJECT (no sibling checkout)."""
+import argparse
+import ctypes as C
+import hmac
+import json
+import os
 from pathlib import Path
-from reference import block, original, ctr
-ROOT=Path(__file__).resolve().parents[1]
+import random
+import shlex
+import struct
+import subprocess
+import sys
+import tempfile
+from reference import block, ctr, original
+
+ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
-parser=argparse.ArgumentParser();parser.add_argument('--sanitize',action='store_true');args=parser.parse_args()
-cc=shlex.split(os.environ.get('CC','cc'))
-flags=shlex.split(os.environ.get('CFLAGS','-O2 -Wall -Wextra -Werror'))
-try:
-    openssl=shlex.split(subprocess.check_output(['pkg-config','--cflags','--libs','openssl'],stderr=subprocess.DEVNULL,text=True))
-except (OSError,subprocess.CalledProcessError):
-    prefix=next((p for p in [Path('/opt/homebrew/opt/openssl'),Path('/usr/local/opt/openssl')] if p.exists()),None)
-    openssl=([f'-I{prefix}/include',f'-L{prefix}/lib','-lcrypto'] if prefix else ['-lcrypto'])
-P=C.c_void_p; Z=C.c_size_t; U=C.c_ubyte
-class Ctx(C.Structure): _fields_=[('enc',U*16),('mac',U*32)]
+PROJECT = (ROOT / 'PROJECT').read_text().strip()
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--sanitize', action='store_true')
+args = parser.parse_args()
+cc = shlex.split(os.environ.get('CC', 'cc'))
+flags = shlex.split(os.environ.get('CFLAGS', '-O2 -Wall -Wextra -Werror'))
+stems = dict(A='src/xxtea128', B='src/txxtea128', C='src/txxtea128_rs', D='src/txxtea128', E='src/txxtea128', F='src/txxtea128', G='src/txxtea128_h')
+wrappers = dict(D='src/txxtea_etm', E='src/txxtea_etm_ctx', F='src/txxtea_etm_aad')
+sources = ['src/xxtea.c'] if PROJECT == 'original' else [stems[PROJECT] + '.c']
+openssl = []
+if PROJECT in wrappers:
+    sources.append(wrappers[PROJECT] + '.c')
+    try:
+        openssl = shlex.split(subprocess.check_output(
+            ['pkg-config', '--cflags', '--libs', 'openssl'], text=True,
+            stderr=subprocess.DEVNULL))
+    except (OSError, subprocess.CalledProcessError):
+        prefix = next((p for p in (Path('/opt/homebrew/opt/openssl'),
+                                  Path('/usr/local/opt/openssl')) if p.exists()), None)
+        openssl = [f'-I{prefix}/include', f'-L{prefix}/lib', '-lcrypto'] if prefix else ['-lcrypto']
+P, Z = C.c_void_p, C.c_size_t
+class Context(C.Structure):
+    _fields_ = [('enc', C.c_ubyte * 16), ('mac', C.c_ubyte * 32)]
+rng = random.Random(20261010)
+checks = 0
+lengths = list(range(66)) + [127, 128, 129, 255, 256, 257, 1023, 1024, 4095, 4096]
+def rand(n):
+    return bytes(rng.randrange(256) for _ in range(n))
 def buf(data):
-    if isinstance(data,int):return C.create_string_buffer(max(data,1))
-    return C.create_string_buffer(data,max(len(data),1))
-def api(lib,name,types,ret=C.c_int):
-    f=getattr(lib,name);f.argtypes=types;f.restype=ret;return f
-rng=random.Random(20261010)
-def rand(n):return bytes(rng.randrange(256) for _ in range(n))
-checks=0
-def check(ok,msg):
+    return C.create_string_buffer(max(data, 1)) if isinstance(data, int) else C.create_string_buffer(data, max(len(data), 1))
+def check(condition, message):
     global checks
-    checks+=1
-    if not ok:raise AssertionError(msg)
-lengths=list(range(0,66))+[127,128,129,255,256,257,1023,1024,4095,4096]
-with tempfile.TemporaryDirectory(prefix='txxtea-tests-') as td:
-    td=Path(td)
-    def build(name,sources,extra=()):
-        target=td/(name+('.dylib' if sys.platform=='darwin' else '.so'))
-        subprocess.run(cc+flags+['-shared','-fPIC']+sources+list(extra)+['-o',str(target)],check=True)
-        return C.CDLL(str(target))
-    base=build('original',['xxtea.c'])
-    libc=C.CDLL(None);free=api(libc,'free',[P],None)
-    rawenc=api(base,'xxtea_encrypt_raw',[P,Z,P,C.POINTER(Z)],P)
-    rawdec=api(base,'xxtea_decrypt_raw',[P,Z,P,C.POINTER(Z)],P)
-    legacy=api(base,'xxtea_encrypt',[P,Z,P,C.POINTER(Z)],P)
-    def alloc_call(f,data,key):
-        n=Z(99);p=f(buf(data),len(data),buf(key),C.byref(n))
-        if not p:return None,n.value
-        result=C.string_at(p,n.value);free(p);return result,n.value
+    checks += 1
+    if not condition:
+        raise AssertionError(message)
+def api(lib, name, types, result=C.c_int):
+    fn = getattr(lib, name)
+    fn.argtypes, fn.restype = types, result
+    return fn
+free = api(C.CDLL(None), 'free', [P], None)
+
+def test_original(lib):
+    encrypt = api(lib, 'xxtea_encrypt_raw', [P, Z, P, C.POINTER(Z)], P)
+    decrypt = api(lib, 'xxtea_decrypt_raw', [P, Z, P, C.POINTER(Z)], P)
+    legacy = api(lib, 'xxtea_encrypt', [P, Z, P, C.POINTER(Z)], P)
+    def call(fn, data, key):
+        n = Z(99)
+        out = fn(buf(data), len(data), buf(key), C.byref(n))
+        if not out:
+            return None, n.value
+        data = C.string_at(out, n.value)
+        free(out)
+        return data, n.value
     for n in lengths[1:]:
-        key=rand(16);pt=rand(n);ct,size=alloc_call(rawenc,pt,key)
-        check(ct==original(pt,key),f'original reference {n}')
-        check(alloc_call(rawdec,ct,key)==(pt,n),f'original inverse {n}')
-    for key in [b'',b'a',b'1234567890',b'abc\0ignored']:
-        ct,n=alloc_call(legacy,b'hello',key)
-        normalized=key.split(b'\0')[0][:16].ljust(16,b'\0')
-        check(ct==original(b'hello',normalized),'legacy string compatibility')
-    for n in [0,1,2,3,4,5,6,7,9,10,11,13]:check(alloc_call(rawdec,bytes(n),bytes(16))==(None,0),'invalid ciphertext size')
-    outlen=Z(42);check(not rawenc(None,1,buf(bytes(16)),C.byref(outlen)) and outlen.value==0,'null plaintext')
-    check(not rawenc(buf(b'x'),1,buf(bytes(16)),None),'null length')
-    for n in [2**32,2**64-1] if C.sizeof(Z)==8 else [2**32-1]:
-        check(not rawenc(buf(b'x'),n,buf(bytes(16)),C.byref(outlen)),'oversize base')
-    key1=b'\0'+bytes(range(1,16));key2=b'\0'+b'X'*15
-    check(alloc_call(rawenc,b'hello',key1)[0]!=alloc_call(rawenc,b'hello',key2)[0],'binary key tail matters')
-    libs={};vectors={}
-    for v,stem in [('A','xxtea128'),('B','txxtea128'),('C','txxtea128_rs'),('D','txxtea128'),('E','txxtea128'),('F','txxtea128'),('G','txxtea128_h')]:
-        sources=[f'variants/variant_{v}/{stem}.c']
-        if v in 'DEF':sources += [f'variants/variant_{v}/'+{'D':'txxtea_etm.c','E':'txxtea_etm_ctx.c','F':'txxtea_etm_aad.c'}[v]]
-        lib=build(v,sources,openssl if v in 'DEF' else []);libs[v]=lib
-        enc=api(lib,stem+'_encrypt_block',[P,P,P]+([] if v=='A' else [P]),None)
-        dec=api(lib,stem+'_decrypt_block',[P,P,P]+([] if v=='A' else [P]),None)
-        stream=api(lib,stem+'_ctr_xor',[P,Z,P,P])
-        spec=v if v in 'ABCG' else 'B'
-        for i in range(200):
-            pt,key,tweak=(bytes(range(16)),bytes(range(16,32)),bytes(range(32,48))) if i==0 else (rand(16),rand(16),rand(16))
-            out=buf(16);k=buf(key);t=buf(tweak)
-            tail=[k]+([] if v=='A' else [t])
-            enc(out,buf(pt),*tail);expected=block(pt,key,tweak,spec)
-            check(out.raw[:16]==expected,f'{v} reference {i}')
-            if i==0:vectors[v]={'plaintext':pt.hex(),'key':key.hex(),'tweak':tweak.hex(),'ciphertext':expected.hex()}
-            dec(out,out,*tail);check(out.raw[:16]==pt,f'{v} inverse/in-place {i}')
-            enc(out,out,*tail);check(out.raw[:16]==expected,f'{v} encrypt in-place {i}')
-        for n in lengths:
-            pt,key,nonce=rand(n),rand(16),rand(12);out=buf(pt)
-            check(stream(out,n,buf(key),buf(nonce))==1,f'{v} CTR success')
-            check(out.raw[:n]==ctr(pt,key,nonce,spec),f'{v} CTR reference {n}')
-            stream(out,n,buf(key),buf(nonce));check(out.raw[:n]==pt,f'{v} CTR roundtrip {n}')
-        out=buf(b'canary');before=out.raw
-        check(not stream(None,1,buf(bytes(16)),buf(bytes(12))),f'{v} null data')
-        if C.sizeof(Z)==8:check(not stream(out,2**36+1,buf(bytes(16)),buf(bytes(12))) and out.raw==before,f'{v} counter overflow rejection')
-        print(f'{v}: independent block/CTR reference, inverse, in-place, lengths, invalid arguments PASS')
-    master=bytes(range(32));mk=buf(master);nonce=bytes(range(12))
-    enc_key=hmac.digest(master,b'enc','sha256')[:16];mac_key=hmac.digest(master,b'mac','sha256')
-    dseal=api(libs['D'],'txxtea_etm_seal',[P,Z,P,C.POINTER(P),C.POINTER(Z)])
-    dopen=api(libs['D'],'txxtea_etm_open',[P,Z,P,C.POINTER(P),C.POINTER(Z)])
-    def d_open(packet,key=master):
-        p=P();n=Z(999);ok=dopen(buf(packet),len(packet),buf(key),C.byref(p),C.byref(n))
-        data=C.string_at(p,n.value) if p.value else None
-        if p.value:free(p)
-        return ok,data,n.value
-    def packet_ref(pt,nonce,aad=None):
-        packet=(b'TX1' if aad is None else b'TX2')+b'\x01'+nonce+struct.pack('<I',len(pt))
-        if aad is not None:packet+=struct.pack('<I',len(aad))+aad
-        packet+=ctr(pt,enc_key,nonce,'B')
-        return packet+hmac.digest(mac_key,packet,'sha256')
-    contexts={}
-    for v in 'EF':
-        ctx=Ctx();prefix='txxtea_etm'+('_aad' if v=='F' else '')
-        init=api(libs[v],prefix+'_ctx_init',[P,P]);check(init(C.byref(ctx),mk)==1,'ctx init')
-        check(bytes(ctx.enc)==enc_key and bytes(ctx.mac)==mac_key,'independent KDF')
-        contexts[v]=ctx
-    eseal=api(libs['E'],'txxtea_etm_seal_into',[P,P,Z,P,P,Z,C.POINTER(Z)])
-    eopen=api(libs['E'],'txxtea_etm_open_into',[P,P,Z,P,Z,C.POINTER(Z)])
-    fseal=api(libs['F'],'txxtea_etm_aad_seal_into',[P,P,Z,P,Z,P,P,Z,C.POINTER(Z)])
-    fopen=api(libs['F'],'txxtea_etm_aad_open_into',[P,P,Z,P,Z,C.POINTER(Z),P,Z,C.POINTER(Z)])
-    def into_open(v,packet,cap=5000,acap=5000):
-        out=buf(b'Z'*5000);aout=buf(b'Q'*5000);n=Z(99);an=Z(99)
-        if v=='E':ok=eopen(C.byref(contexts[v]),buf(packet),len(packet),out,cap,C.byref(n))
-        else:ok=fopen(C.byref(contexts[v]),buf(packet),len(packet),out,cap,C.byref(n),aout,acap,C.byref(an))
-        if not ok:
-            check(n.value==0 and out.raw[:5000]==b'Z'*5000,'reject without plaintext')
-            if v=='F':check(an.value==0 and aout.raw[:5000]==b'Q'*5000,'reject without AAD')
-        return ok,out.raw[:n.value],aout.raw[:an.value] if v=='F' else None
+        pt, key = rand(n), rand(16)
+        ct, size = call(encrypt, pt, key)
+        check(ct == original(pt, key), f'original reference length {n}')
+        check(call(decrypt, ct, key) == (pt, n), f'original inverse length {n}')
+    for key in [b'', b'k', b'abc\0ignored', b'0123456789abcdef']:
+        check(call(legacy, b'hello', key)[0] == original(b'hello', key.split(b'\0')[0][:16].ljust(16, b'\0')), 'legacy string key')
+    for n in [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13]:
+        check(call(decrypt, bytes(n), bytes(16)) == (None, 0), 'invalid ciphertext size')
+    n = Z(99)
+    check(not encrypt(None, 1, buf(bytes(16)), C.byref(n)) and n.value == 0, 'null input')
+    check(not encrypt(buf(b'x'), 1, None, C.byref(n)), 'null key')
+    check(not encrypt(buf(b'x'), 1, buf(bytes(16)), None), 'null length')
+    for size in ([2**32, 2**64 - 1] if C.sizeof(Z) == 8 else [2**32 - 1]):
+        check(not encrypt(buf(b'x'), size, buf(bytes(16)), C.byref(n)), 'overflow')
+    check(call(encrypt, b'hello', b'\0' + b'A'*15)[0] != call(encrypt, b'hello', b'\0' + b'B'*15)[0], 'binary-key tail')
+
+def test_core(lib):
+    stem = stems[PROJECT]
+    spec = PROJECT if PROJECT in 'ABCG' else 'B'
+    enc = api(lib, stem + '_encrypt_block', [P, P, P] + ([] if PROJECT == 'A' else [P]), None)
+    dec = api(lib, stem + '_decrypt_block', [P, P, P] + ([] if PROJECT == 'A' else [P]), None)
+    stream = api(lib, stem + '_ctr_xor', [P, Z, P, P])
+    fixture = json.loads((ROOT / 'tests/known_answers.json').read_text())[PROJECT]
+    for i in range(200):
+        pt, key, tweak = ((bytes.fromhex(fixture[k]) for k in ('plaintext', 'key', 'tweak'))
+                          if i == 0 else (rand(16), rand(16), rand(16)))
+        out = buf(pt)
+        tail = [buf(key)] + ([] if PROJECT == 'A' else [buf(tweak)])
+        enc(out, out, *tail)
+        expected = block(pt, key, tweak, spec)
+        check(out.raw[:16] == expected, 'block reference/in-place')
+        if i == 0:
+            check(out.raw[:16].hex() == fixture['ciphertext'], 'frozen vector')
+        dec(out, out, *tail)
+        check(out.raw[:16] == pt, 'inverse/in-place')
+        enc(out, buf(pt), *tail)
+        check(out.raw[:16] == expected, 'disjoint block buffers')
     for n in lengths:
-        pt=rand(n);p=P();pn=Z();check(dseal(buf(pt) if n else None,n,mk,C.byref(p),C.byref(pn))==1,'D seal')
-        packet=C.string_at(p,pn.value);free(p)
-        check(packet==packet_ref(pt,packet[4:16]),'D independent envelope/HMAC')
-        check(d_open(packet)==(1,pt,n),'D roundtrip')
-        check(into_open('E',packet)[0:2]==(1,pt),'D to E compatibility')
-        for v in 'EF':
-            aad=rand(n%33);out=buf(n+len(aad)+56);size=Z()
-            if v=='E':ok=eseal(C.byref(contexts[v]),buf(pt),n,buf(nonce),out,len(out),C.byref(size))
-            else:ok=fseal(C.byref(contexts[v]),buf(pt),n,buf(aad),len(aad),buf(nonce),out,len(out),C.byref(size))
-            packet=out.raw[:size.value];expected=packet_ref(pt,nonce,aad if v=='F' else None)
-            check(ok==1 and packet==expected,f'{v} independent envelope/HMAC')
-            opened=into_open(v,packet);check(opened[0:2]==(1,pt),f'{v} roundtrip')
-            if v=='F':check(opened[2]==aad,'F AAD')
-            else:check(d_open(packet)==(1,pt,n),'E to D compatibility')
-    for v in 'DEF':
-        packet=packet_ref(b'authenticated message',nonce,b'metadata' if v=='F' else None)
-        op=d_open if v=='D' else lambda x:into_open(v,x)
-        for i in range(len(packet)*8):
-            tampered=bytearray(packet);tampered[i//8]^=1<<(i%8)
-            check(op(bytes(tampered))[0]==0,f'{v} tamper bit {i}')
-        for n in range(len(packet)):check(op(packet[:n])[0]==0,f'{v} truncation {n}')
-        check(op(packet+b'\0')[0]==0,f'{v} trailing byte')
-        if v=='D':check(d_open(packet,bytes(32))[0]==0,'D wrong key')
+        pt, key, nonce = rand(n), rand(16), rand(12)
+        out = buf(pt)
+        check(stream(out, n, buf(key), buf(nonce)) == 1, 'stream success')
+        check(out.raw[:n] == ctr(pt, key, nonce, spec), 'stream reference')
+        check(stream(out, n, buf(key), buf(nonce)) == 1 and out.raw[:n] == pt, 'stream inverse')
+    key, nonce, out = buf(bytes(16)), buf(bytes(12)), buf(b'canary')
+    check(not stream(None, 1, key, nonce), 'null nonempty input')
+    check(stream(None, 0, key, nonce) == 1, 'empty input')
+    check(not stream(out, 1, None, nonce), 'null key')
+    check(not stream(out, 1, key, None), 'null nonce')
+    if C.sizeof(Z) == 8:
+        check(not stream(out, 2**36 + 1, key, nonce) and out.raw[:6] == b'canary', 'counter overflow before write')
+
+def test_envelope(lib):
+    master, nonce = bytes(range(32)), bytes(range(12))
+    ek, mk = hmac.digest(master, b'enc', 'sha256')[:16], hmac.digest(master, b'mac', 'sha256')
+    context = Context()
+    if PROJECT == 'D':
+        seal = api(lib, 'txxtea_etm_seal', [P, Z, P, C.POINTER(P), C.POINTER(Z)])
+        open_ = api(lib, 'txxtea_etm_open', [P, Z, P, C.POINTER(P), C.POINTER(Z)])
+    else:
+        prefix = 'txxtea_etm' + ('_aad' if PROJECT == 'F' else '')
+        init = api(lib, prefix + '_ctx_init', [P, P])
+        clear = api(lib, prefix + '_ctx_clear', [P], None)
+        check(init(C.byref(context), buf(master)) == 1, 'context init')
+        check(bytes(context.enc) == ek and bytes(context.mac) == mk, 'independent KDF')
+        seal_types = [P, P, Z] + ([P, Z] if PROJECT == 'F' else []) + [P, P, Z, C.POINTER(Z)]
+        open_types = [P, P, Z, P, Z, C.POINTER(Z)] + ([P, Z, C.POINTER(Z)] if PROJECT == 'F' else [])
+        seal = api(lib, prefix + '_seal_into', seal_types)
+        open_ = api(lib, prefix + '_open_into', open_types)
+    def expected(pt, nonce, aad=b''):
+        packet = (b'TX2' if PROJECT == 'F' else b'TX1') + b'\x01' + nonce + struct.pack('<I', len(pt))
+        if PROJECT == 'F':
+            packet += struct.pack('<I', len(aad)) + aad
+        packet += ctr(pt, ek, nonce, 'B')
+        return packet + hmac.digest(mk, packet, 'sha256')
+    def open_packet(packet, wrong_key=False, capacity=5000, aad_capacity=5000):
+        n, an = Z(99), Z(99)
+        if PROJECT == 'D':
+            out = P()
+            ok = open_(buf(packet), len(packet), buf(bytes(32) if wrong_key else master), C.byref(out), C.byref(n))
+            data = C.string_at(out, n.value) if out.value else None
+            if out.value:
+                free(out)
+            if not ok:
+                check(not out.value and n.value == 0, 'D rejection output reset')
+            return ok, data, None
+        out, aout = buf(b'Z'*5000), buf(b'Q'*5000)
+        ctx = Context() if wrong_key else context
+        tail = [aout, aad_capacity, C.byref(an)] if PROJECT == 'F' else []
+        ok = open_(C.byref(ctx), buf(packet), len(packet), out, capacity, C.byref(n), *tail)
+        if not ok:
+            check(n.value == 0 and out.raw[:5000] == b'Z'*5000, 'no plaintext on rejection')
+            if PROJECT == 'F':
+                check(an.value == 0 and aout.raw[:5000] == b'Q'*5000, 'no AAD on rejection')
+        return ok, out.raw[:n.value], aout.raw[:an.value] if PROJECT == 'F' else None
+    for size in lengths:
+        pt, aad, n = rand(size), rand(size % 33), Z()
+        if PROJECT == 'D':
+            out = P()
+            ok = seal(buf(pt) if size else None, size, buf(master), C.byref(out), C.byref(n))
+            check(ok == 1 and bool(out.value), 'D seal')
+            packet = C.string_at(out, n.value)
+            free(out)
         else:
-            saved=contexts[v];contexts[v]=Ctx();check(op(packet)[0]==0,f'{v} wrong key');contexts[v]=saved
-            check(into_open(v,packet,cap=1)[0]==0,f'{v} short capacity')
-            if v=='F':check(into_open(v,packet,acap=1)[0]==0,'F short AAD capacity')
-        for offset in ([16,20] if v=='F' else [16]):
-            corrupted=bytearray(packet);corrupted[offset:offset+4]=b'\xff'*4
-            check(op(bytes(corrupted))[0]==0,'oversized declared lengths')
-        print(f'{v}: independent HMAC/KDF/envelope, every-bit tamper, truncation, wrong key PASS')
-    out=buf(b'Z'*100);n=Z(99)
-    check(not eseal(C.byref(contexts['E']),buf(b'x'),1,buf(nonce),out,52,C.byref(n)) and n.value==0 and out.raw[:100]==b'Z'*100,'E short seal buffer')
-    check(not fseal(C.byref(contexts['F']),buf(b'x'),1,buf(b'a'),1,buf(nonce),out,56,C.byref(n)) and n.value==0,'F short seal buffer')
-    for v in 'EF':
-        clear=api(libs[v],'txxtea_etm'+('_aad' if v=='F' else '')+'_ctx_clear',[P],None)
-        clear(C.byref(contexts[v]));check(bytes(contexts[v])==bytes(48),'context wipe')
-    # Frozen vectors guard against changes to both reference and implementation.
-    fixture=ROOT/'tests/known_answers.json'
-    check(json.loads(fixture.read_text())==vectors,'frozen known-answer vectors')
-    fault_exe=td/'allocation_failures'
-    fault_flags=['-fsanitize=address,undefined','-fno-omit-frame-pointer'] if args.sanitize else []
-    subprocess.run(cc+flags+fault_flags+['tests/allocation_failures.c','-o',str(fault_exe)],check=True)
-    subprocess.run([str(fault_exe)],check=True)
+            out = buf(size + len(aad) + 56)
+            extra = [buf(aad), len(aad)] if PROJECT == 'F' else []
+            ok = seal(C.byref(context), buf(pt), size, *extra, buf(nonce), out, len(out), C.byref(n))
+            check(ok == 1, 'seal into')
+            packet = out.raw[:n.value]
+        check(packet == expected(pt, packet[4:16], aad), 'independent packet/HMAC')
+        opened = open_packet(packet)
+        check(opened[:2] == (1, pt), 'authenticated inverse')
+        if PROJECT == 'F':
+            check(opened[2] == aad, 'AAD inverse')
+    packet = expected(b'authenticated message', nonce, b'metadata')
+    for bit in range(len(packet)*8):
+        changed = bytearray(packet)
+        changed[bit//8] ^= 1 << (bit % 8)
+        check(not open_packet(bytes(changed))[0], 'single-bit tamper')
+    for size in range(len(packet)):
+        check(not open_packet(packet[:size])[0], 'truncated packet')
+    check(not open_packet(packet + b'\0')[0], 'trailing byte')
+    check(not open_packet(packet, wrong_key=True)[0], 'wrong key')
+    for offset in ([16, 20] if PROJECT == 'F' else [16]):
+        changed = bytearray(packet)
+        changed[offset:offset+4] = b'\xff'*4
+        check(not open_packet(bytes(changed))[0], 'oversize length field')
+    if PROJECT != 'D':
+        check(not open_packet(packet, capacity=1)[0], 'short output capacity')
+        if PROJECT == 'F':
+            check(not open_packet(packet, aad_capacity=1)[0], 'short AAD capacity')
+        out, n = buf(b'Z'*100), Z(99)
+        extra = [buf(b'a'), 1] if PROJECT == 'F' else []
+        check(not seal(C.byref(context), buf(b'x'), 1, *extra, buf(nonce), out, 1, C.byref(n)), 'short seal capacity')
+        check(n.value == 0 and out.raw[:100] == b'Z'*100, 'no write on short seal')
+        clear(C.byref(context))
+        check(bytes(context) == bytes(48), 'context cleanup')
+
+with tempfile.TemporaryDirectory(prefix='xxtea-project-') as temp:
+    temp = Path(temp)
+    target = temp / ('project.dylib' if sys.platform == 'darwin' else 'project.so')
+    subprocess.run(cc + flags + ['-shared', '-fPIC'] + sources + openssl + ['-o', str(target)], check=True)
+    library = C.CDLL(str(target))
+    if PROJECT == 'original':
+        test_original(library)
+        fault = temp / 'allocation_failures'
+        subprocess.run(cc + flags + (['-fsanitize=address,undefined'] if args.sanitize else []) + ['tests/allocation_failures.c', '-o', str(fault)], check=True)
+        subprocess.run([str(fault)], check=True)
+    else:
+        test_core(library)
+        if PROJECT in wrappers:
+            test_envelope(library)
     if args.sanitize:
-        exe=td/'sanitizer'
-        sources=['tests/sanitize.c','xxtea.c','example/base64.c','variants/variant_A/xxtea128.c','variants/variant_B/txxtea128.c','variants/variant_C/txxtea128_rs.c','variants/variant_G/txxtea128_h.c','variants/variant_D/txxtea_etm.c','variants/variant_E/txxtea_etm_ctx.c','variants/variant_F/txxtea_etm_aad.c']
-        subprocess.run(cc+['-O1','-g','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Iinclude']+sources+openssl+['-o',str(exe)],check=True)
-        subprocess.run([str(exe)],check=True,env={**os.environ,'UBSAN_OPTIONS':'halt_on_error=1'})
-    print(f'PASS: {checks} assertions; {platform.platform()}; sanitizer={args.sanitize}')
+        driver = temp / 'sanitizer'
+        extra = ['example/base64.c'] if PROJECT == 'original' else []
+        subprocess.run(cc + ['-O1', '-g', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
+                       '-fno-omit-frame-pointer', '-Iinclude', '-DPROJECT_' + PROJECT.upper(),
+                       'tests/sanitize.c'] + sources + extra + openssl + ['-o', str(driver)], check=True)
+        subprocess.run([str(driver)], check=True, env={**os.environ, 'UBSAN_OPTIONS': 'halt_on_error=1'})
+print(f'PASS: {PROJECT}, {checks} assertions, sanitizer={args.sanitize}')

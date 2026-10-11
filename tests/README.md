@@ -1,29 +1,22 @@
-# Correctness tests
+# Tests for original
 
-Run `make test` or `make test-sanitize` from the repository root. Python 3,
-a C compiler and OpenSSL development libraries are required. The runner
-builds temporary shared libraries, so stale benchmark binaries cannot pass a
-test accidentally. Temporary build artifacts are deleted after the run.
+Run `make test` or `make test-sanitize` from this checkout. The runner builds
+fresh temporary libraries from local sources; it never needs sibling projects.
+Python 3 and a C compiler are required. No OpenSSL dependency is used.
 
-`reference.py` is a separate Python word-loop definition of original XXTEA,
-A/B/C/G and their streams. D/E/F's embedded cores are each checked as B.
-`known_answers.json` freezes sample outputs calculated from that reference
-and compared with C; these are project regression vectors, not official
-third-party vectors. Packet HMAC/KDF values are computed independently with
-Python's `hmac` and checked against real OpenSSL output.
+The independent Python reference checks exact outputs as well as inverse
+operations. Original XXTEA additionally checks short/string/binary key
+contracts and six injected allocation failures. Cipher projects test 200
+block cases, exact in-place operation, boundary lengths and counter limits.
+D/E/F additionally test independent KDF/HMAC/packet calculations, every-bit
+mutation and every truncation of a representative packet, wrong keys,
+malformed length fields and output-buffer rejection behavior.
 
-Coverage: 200 block cases per variant, inverse and exact in-place block
-operations, lengths 0..65 plus 127/128/129, 255/256/257, 1023/1024,
-4095/4096; malformed root lengths and argument checks; counter overflow;
-D/E interoperability; all single-bit mutations and all truncations of one
-representative packet per D/E/F; wrong keys, appended bytes, short buffers,
-corrupted length fields, empty messages, context cleanup, binary-key tail
-sensitivity, and legacy string compatibility. The allocation-failure driver
-fails each of the three base encrypt/decrypt allocations (six paths).
+ASan/UBSan runs a separate C driver over 512 message lengths. Original and
+D/E/F also exercise 5000 deterministic malformed inputs. Original tests strict
+Base64 and the short-key regression. Platform-specific 32-bit guards execute
+only on an actual 32-bit build. No native Windows/big-endian validation,
+cryptanalytic security proof or exhaustive OpenSSL fault injection is claimed.
 
-The sanitizer driver tests 512 lengths, short-key safety, strict Base64,
-5000 deterministic malformed inputs, and including E/F headers together.
-Its 32-bit-only huge-length tests run only when actually built for 32 bits.
-The current recorded run is ARM64/macOS; it is not a native 32-bit, Windows,
-big-endian or microcontroller validation. No exhaustive OpenSSL fault
-injection or constant-time/cryptanalytic evaluation is claimed.
+The larger cross-project D/E interoperability and combined-header tests remain
+on `archive/suite`; they are not silently skipped tests in this checkout.

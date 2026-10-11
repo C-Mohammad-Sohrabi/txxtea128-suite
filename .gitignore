@@ -45,3 +45,5 @@ __pycache__/
 .zcodeignore
 /build/
 *.o
+
+/example/xxtea_example
