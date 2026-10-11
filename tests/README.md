@@ -1,4 +1,4 @@
-# Tests for original
+# Tests for G
 
 Run `make test` or `make test-sanitize` from this checkout. The runner builds
 fresh temporary libraries from local sources; it never needs sibling projects.
