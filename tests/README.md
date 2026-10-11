@@ -1,8 +1,8 @@
-# Tests for original
+# Tests for E
 
 Run `make test` or `make test-sanitize` from this checkout. The runner builds
 fresh temporary libraries from local sources; it never needs sibling projects.
-Python 3 and a C compiler are required. No OpenSSL dependency is used.
+Python 3 and a C compiler are required. OpenSSL is also required.
 
 The independent Python reference checks exact outputs as well as inverse
 operations. Original XXTEA additionally checks short/string/binary key
