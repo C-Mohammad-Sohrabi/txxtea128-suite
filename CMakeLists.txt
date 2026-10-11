@@ -1,5 +1,5 @@
-project(xxtea)
-cmake_minimum_required(VERSION 2.8.12)
+cmake_minimum_required(VERSION 3.16)
+project(xxtea C)
 set(CMAKE_MACOSX_RPATH 1)
 set(LIBXXTEA_SRC xxtea.c)
 add_library(xxtea SHARED ${LIBXXTEA_SRC})
@@ -17,3 +17,11 @@ install(TARGETS xxtea_static
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib)
 install(FILES include/xxtea.h DESTINATION include)
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(xxtea_example example/test.c example/base64.c)
+  target_include_directories(xxtea_example PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(xxtea_example PRIVATE xxtea_static)
+  add_test(NAME xxtea_example COMMAND xxtea_example)
+endif()

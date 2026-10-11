@@ -16,6 +16,7 @@
 
 
 #include "xxtea.h"
+#include "crypto_util.h"
 
 #include <string.h>
 #if defined(_MSC_VER) && _MSC_VER < 1600
@@ -84,12 +85,12 @@ typedef unsigned __int32 uint32_t;
 #define MX (((z >> 5) ^ (y << 2)) + ((y >> 3) ^ (z << 4))) ^ ((sum ^ y) + (key[(p & 3) ^ e] ^ z))
 #define DELTA 0x9e3779b9
 
-#define FIXED_KEY \
-    size_t i;\
-    uint8_t fixed_key[16];\
-    memcpy(fixed_key, key, 16);\
-    for (i = 0; (i < 16) && (fixed_key[i] != 0); ++i);\
-    for (++i; i < 16; ++i) fixed_key[i] = 0;\
+/* Legacy string keys: stop at NUL without reading beyond the string. */
+static void string_key(uint8_t fixed[16], const uint8_t *key) {
+    size_t i = 0;
+    memset(fixed, 0, 16);
+    while (i < 16 && key[i]) { fixed[i] = key[i]; ++i; }
+}
 
 
 static uint32_t * xxtea_to_uint_array(const uint8_t * data, size_t len, int inc_len, size_t * out_len) {
@@ -140,6 +141,7 @@ static uint8_t * xxtea_to_ubyte_array(const uint32_t * data, size_t len, int inc
     }
 
     out = (uint8_t *)malloc(n + 1);
+    if (!out) return NULL;
 
 #if defined(BYTE_ORDER) && (BYTE_ORDER == LITTLE_ENDIAN)
     memcpy(out, data, n);
@@ -211,12 +213,15 @@ static uint8_t * xxtea_ubyte_encrypt(const uint8_t * data, size_t len, const uin
 
     key_array  = xxtea_to_uint_array(key, 16, 0, &key_len);
     if (!key_array) {
+        xxtea_secure_zero(data_array, data_len * sizeof(*data_array));
         free(data_array);
         return NULL;
     }
 
     out = xxtea_to_ubyte_array(xxtea_uint_encrypt(data_array, data_len, key_array), data_len, 0, out_len);
 
+    xxtea_secure_zero(data_array, data_len * sizeof(*data_array));
+    xxtea_secure_zero(key_array, key_len * sizeof(*key_array));
     free(data_array);
     free(key_array);
 
@@ -235,26 +240,58 @@ static uint8_t * xxtea_ubyte_decrypt(const uint8_t * data, size_t len, const uin
 
     key_array  = xxtea_to_uint_array(key, 16, 0, &key_len);
     if (!key_array) {
+        xxtea_secure_zero(data_array, data_len * sizeof(*data_array));
         free(data_array);
         return NULL;
     }
 
     out = xxtea_to_ubyte_array(xxtea_uint_decrypt(data_array, data_len, key_array), data_len, 1, out_len);
 
+    xxtea_secure_zero(data_array, data_len * sizeof(*data_array));
+    xxtea_secure_zero(key_array, key_len * sizeof(*key_array));
     free(data_array);
     free(key_array);
 
     return out;
 }
 
-// public functions
-
-void * xxtea_encrypt(const void * data, size_t len, const void * key, size_t * out_len) {
-    FIXED_KEY
-    return xxtea_ubyte_encrypt((const uint8_t *)data, len, fixed_key, out_len);
+// Public functions. Empty input is rejected by the original byte envelope.
+static int valid_args(const void *data, size_t len, const void *key,
+                      size_t *out_len, int decrypt) {
+    if (!out_len) return 0;
+    *out_len = 0;
+    if (!data || !key || !len) return 0;
+    if (decrypt) return len >= 8 && !(len & 3) && len <= SIZE_MAX - 1 && (uint64_t)len <= UINT64_C(4294967300);
+    /* Stored plaintext length is uint32; allow space for padding + length + NUL. */
+    return len <= UINT32_MAX && len <= SIZE_MAX - 8;
 }
 
-void * xxtea_decrypt(const void * data, size_t len, const void * key, size_t * out_len) {
-    FIXED_KEY
-    return xxtea_ubyte_decrypt((const uint8_t *)data, len, fixed_key, out_len);
+void *xxtea_encrypt_raw(const void *data, size_t len, const void *key, size_t *out_len) {
+    if (!valid_args(data, len, key, out_len, 0)) return NULL;
+    return xxtea_ubyte_encrypt(data, len, key, out_len);
+}
+
+void *xxtea_decrypt_raw(const void *data, size_t len, const void *key, size_t *out_len) {
+    if (!valid_args(data, len, key, out_len, 1)) return NULL;
+    return xxtea_ubyte_decrypt(data, len, key, out_len);
+}
+
+void *xxtea_encrypt(const void *data, size_t len, const void *key, size_t *out_len) {
+    uint8_t fixed[16];
+    void *result;
+    if (!valid_args(data, len, key, out_len, 0)) return NULL;
+    string_key(fixed, key);
+    result = xxtea_ubyte_encrypt(data, len, fixed, out_len);
+    xxtea_secure_zero(fixed, sizeof(fixed));
+    return result;
+}
+
+void *xxtea_decrypt(const void *data, size_t len, const void *key, size_t *out_len) {
+    uint8_t fixed[16];
+    void *result;
+    if (!valid_args(data, len, key, out_len, 1)) return NULL;
+    string_key(fixed, key);
+    result = xxtea_ubyte_decrypt(data, len, fixed, out_len);
+    xxtea_secure_zero(fixed, sizeof(fixed));
+    return result;
 }

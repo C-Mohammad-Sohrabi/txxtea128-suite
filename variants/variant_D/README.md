@@ -1,6 +1,6 @@
 # variant_D — Authenticated encryption (Encrypt-then-MAC)
 
-A complete **sealed-box** API: encrypts with the tweakable XXTEA-128
+A complete **symmetric authenticated-encryption** API: encrypts with the tweakable XXTEA-128
 cipher in CTR mode and authenticates the result with **HMAC-SHA256**.
 
 **Construction (Encrypt-then-MAC):**
@@ -82,5 +82,5 @@ binding, use variant F.
 - **vs E:** same cryptography, but E is context-based (precomputed keys,
   caller nonce + buffers, no malloc).
 - **vs F:** F adds Associated Data (AAD) and uses the same ctx-based API.
-- **vs G:** G is a cipher-only redesign (stronger core, no authentication
-  layer); G's CTR API can drop into this wrapper.
+- **vs G:** G is a cipher-only redesign (redesigned, unvetted core, no authentication
+  layer); using G requires adapting the called function/header and assigning a new envelope identifier; it changes ciphertext compatibility.

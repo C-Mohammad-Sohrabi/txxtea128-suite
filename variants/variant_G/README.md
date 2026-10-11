@@ -1,10 +1,9 @@
 # variant_G — Hardened tweakable XXTEA-128
 
-A cipher-only redesign that fixes the structural weaknesses of variants
-B and C (weak tweak injection, linear schedule, minimum rounds, no
-whitening):
+An experimental cipher-only redesign of the B/C branch. The changes below
+are design choices, not demonstrated fixes for cryptanalytic attacks:
 
-1. **32 rounds** instead of the bare minimum 19 (`6 + 52/4`).
+1. **32 rounds** instead of the original n=4 count of 19 (`6 + 52/4`).
 2. **Pre/post whitening** — key+tweak material hits the data before round 1
    and after the last round (B/C have none).
 3. **Feedback key/tweak schedule** instead of C's linear one: a state
@@ -13,13 +12,13 @@ whitening):
    words), 32-bit additions for nonlinearity, two state words combined per
    round key.
 4. **CTR mode with the same shape as A/B/C** — `ctr_xor(data, len, key,
-   nonce12)` — so it can drop into the D/E/F authenticated-encryption
-   wrappers unchanged.
+   nonce12)` — integration with D/E/F requires adapting function names/headers
+   and introducing a distinct envelope identifier; ciphertext changes.
 
 > ⚠️ **Security status:** experimental, **not a vetted cipher**. Verified
-> only by round-trip and avalanche smoke tests (~50% diffusion on
-> key/nonce flips, key diffuses from round 1). No cryptanalysis or
-> known-answer vectors exist yet. Do not use for production secrets.
+> by the independent reference, inverse/CTR tests, frozen project vectors,
+> and ASan/UBSan tests in `../../tests`. These are correctness checks,
+> not a cryptanalytic security evaluation. Do not use for production secrets.
 
 ## Files
 
@@ -48,8 +47,8 @@ make clean
 ./bench_g
 ```
 
-Measured on macOS (Apple Silicon, clang -O2): ~490 ns per 16-byte block
-vs ~210 ns for variant A — roughly 2.3× the cost of the baseline.
+Benchmark timings depend on the compiler, machine and cleanup work. Run
+`make run` on the target system; no fixed performance ratio is promised.
 
 ## API
 
@@ -61,7 +60,7 @@ void txxtea128_h_encrypt_block(uint8_t out[16], const uint8_t in[16],
 void txxtea128_h_decrypt_block(uint8_t out[16], const uint8_t in[16],
                                const uint8_t key[16], const uint8_t tweak[16]);
 
-void txxtea128_h_ctr_xor(uint8_t *data, size_t len,
+int txxtea128_h_ctr_xor(uint8_t *data, size_t len,
                          const uint8_t key[16], const uint8_t nonce12[12]);
 ```
 
@@ -71,8 +70,14 @@ nonce)` pair; output length == input length; encrypt == decrypt in CTR.
 ## How it differs from the other variants
 
 - **vs A:** no tweak, 19 rounds, raw key words.
-- **vs B:** tweak only as a final XOR (removable), 19 rounds.
+- **vs B:** tweak XORed into each MX update, 19 rounds.
 - **vs C:** linear schedule (XOR/rotate), 19 rounds, no whitening.
 - **vs D/E/F:** those are *authenticated-encryption wrappers* around
-  variant B's cipher; G is the strongest raw cipher core and is meant to
-  replace the `txxtea128.c` inside those wrappers.
+  variant B's cipher; G is a separate unvetted core and is not currently
+  used by those wrappers. Relative security has not been established.
+
+CTR returns 1 on success, 0 on invalid arguments or counter exhaustion
+(more than 2^36 bytes), before changing data. Each call restarts the counter;
+do not split messages into repeated calls with the same key/nonce.
+The source now includes the shared `../../crypto_util.h` helper; preserve
+that relative path when copying a variant, or adapt the include explicitly.

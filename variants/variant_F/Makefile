@@ -31,7 +31,7 @@ endif
 
 TARGET := demo_aad
 SRCS   := txxtea128.c txxtea_etm_aad.c demo_aad.c
-HDRS   := txxtea128.h txxtea_etm_aad.h
+HDRS   := ../../crypto_util.h txxtea128.h txxtea_etm_aad.h
 
 all: $(TARGET)
 

@@ -9,7 +9,7 @@
 #   make bench          build the root benchmark (original XXTEA library)
 #   make menu           build the interactive test menu (./menu)
 #   make variant_A      build one variant (same for variant_B .. variant_G)
-#   make VARIANT=G      build a single variant chosen by name (A..G)
+#   make variant VARIANT=G  build a single variant chosen by name (A..G)
 #   make demo           build the ETM demos (variant_D, variant_F)
 #   make run            run the root bench + every variant bench/demo
 #   make clean          remove all built binaries
@@ -37,7 +37,7 @@ VDIR     := variants
 all: bench menu $(addprefix variant_,$(VARIANTS))
 
 # --- root benchmark (original src/xxtea.c library) ---
-bench: src/bench.c src/xxtea.c include/xxtea.h
+bench: src/bench.c src/xxtea.c include/xxtea.h include/crypto_util.h
 	$(CC) $(CFLAGS) -Iinclude -o $@ src/bench.c src/xxtea.c
 
 # --- interactive test menu ---
@@ -96,6 +96,13 @@ help:
 	@echo "Examples:"
 	@echo "  make all              # build everything"
 	@echo "  make variant_G        # build only variant_G"
-	@echo "  make VARIANT=F        # same thing, by name"
+	@echo "  make variant VARIANT=F # same thing, by name"
 	@echo "  make menu             # interactive test menu (pick a component)"
 	@echo "  make run              # build + run every benchmark/demo"
+
+.PHONY: test test-sanitize
+test:
+	python3 tests/run_tests.py
+
+test-sanitize:
+	python3 tests/run_tests.py --sanitize

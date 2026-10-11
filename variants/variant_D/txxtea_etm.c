@@ -46,6 +46,7 @@ static int random_bytes(uint8_t *buf, size_t n) {
             if (errno == EINTR) continue;
             return 0;
         }
+        if (r == 0) return 0;
         off += (size_t)r;
     }
     return 1;
@@ -67,17 +68,22 @@ static int derive_keys(const uint8_t master_key[32],
 
     // enc
     if (!HMAC(EVP_sha256(), master_key, 32,
-              (const unsigned char*)"enc", 3, tmp, &outlen)) return 0;
-    if (outlen != 32) return 0;
+              (const unsigned char*)"enc", 3, tmp, &outlen)) goto key_fail;
+    if (outlen != 32) goto key_fail;
     memcpy(enc_key16, tmp, 16);
 
     // mac
     if (!HMAC(EVP_sha256(), master_key, 32,
-              (const unsigned char*)"mac", 3, mac_key32, &outlen)) return 0;
-    if (outlen != 32) return 0;
+              (const unsigned char*)"mac", 3, mac_key32, &outlen)) goto key_fail;
+    if (outlen != 32) goto key_fail;
 
     OPENSSL_cleanse(tmp, sizeof(tmp));
     return 1;
+key_fail:
+    OPENSSL_cleanse(tmp, sizeof(tmp));
+    OPENSSL_cleanse(enc_key16, 16);
+    OPENSSL_cleanse(mac_key32, 32);
+    return 0;
 }
 
 static int compute_tag(uint8_t tag_out[32],
@@ -92,15 +98,21 @@ static int compute_tag(uint8_t tag_out[32],
 int txxtea_etm_seal(const uint8_t *pt, size_t pt_len,
                     const uint8_t master_key[32],
                     uint8_t **out, size_t *out_len) {
-    if (!pt || !out || !out_len || !master_key) return 0;
-    if (pt_len > 0xFFFFFFFFu) return 0;
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    if ((!pt && pt_len) || !out || !out_len || !master_key) return 0;
+    if (pt_len > UINT32_MAX || pt_len > SIZE_MAX - 52) return 0;
 
     uint8_t enc_key[16];
     uint8_t mac_key[32];
     if (!derive_keys(master_key, enc_key, mac_key)) return 0;
 
     uint8_t nonce[NONCE_LEN];
-    if (!random_bytes(nonce, sizeof(nonce))) return 0;
+    if (!random_bytes(nonce, sizeof(nonce))) {
+        OPENSSL_cleanse(enc_key, sizeof(enc_key));
+        OPENSSL_cleanse(mac_key, sizeof(mac_key));
+        return 0;
+    }
 
     // Allocate output buffer
     // header = 3 magic + 1 ver + 12 nonce + 4 len = 20 bytes
@@ -109,7 +121,11 @@ int txxtea_etm_seal(const uint8_t *pt, size_t pt_len,
     const size_t total = header_len + ct_len + TAG_LEN;
 
     uint8_t *buf = (uint8_t*)malloc(total);
-    if (!buf) return 0;
+    if (!buf) {
+        OPENSSL_cleanse(enc_key, sizeof(enc_key));
+        OPENSSL_cleanse(mac_key, sizeof(mac_key));
+        return 0;
+    }
 
     // Header
     buf[0] = MAGIC0;
@@ -145,6 +161,8 @@ int txxtea_etm_seal(const uint8_t *pt, size_t pt_len,
 int txxtea_etm_open(const uint8_t *in, size_t in_len,
                     const uint8_t master_key[32],
                     uint8_t **pt, size_t *pt_len) {
+    if (pt) *pt = NULL;
+    if (pt_len) *pt_len = 0;
     if (!in || !pt || !pt_len || !master_key) return 0;
 
     const size_t header_len = 3 + 1 + NONCE_LEN + 4;
@@ -158,8 +176,7 @@ int txxtea_etm_open(const uint8_t *in, size_t in_len,
     uint32_t ct_len_u32 = load_le32(in + 4 + NONCE_LEN);
 
     size_t ct_len = (size_t)ct_len_u32;
-    size_t expected_total = header_len + ct_len + TAG_LEN;
-    if (expected_total != in_len) return 0;
+    if (ct_len != in_len - header_len - TAG_LEN) return 0;
 
     const uint8_t *ct = in + header_len;
     const uint8_t *tag = in + header_len + ct_len;
@@ -171,6 +188,7 @@ int txxtea_etm_open(const uint8_t *in, size_t in_len,
     // Verify tag (constant-time compare)
     uint8_t tag_calc[32];
     if (!compute_tag(tag_calc, mac_key, in, header_len + ct_len)) {
+        OPENSSL_cleanse(tag_calc, sizeof(tag_calc));
         OPENSSL_cleanse(enc_key, sizeof(enc_key));
         OPENSSL_cleanse(mac_key, sizeof(mac_key));
         return 0;

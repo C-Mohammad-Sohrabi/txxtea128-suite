@@ -8,12 +8,7 @@
 #include <windows.h>
 #endif
 
-// These are provided by the xxtea-c library.
-// You link bench.c with xxtea.c when compiling.
-unsigned char *xxtea_encrypt(const unsigned char *data, size_t len,
-                            const unsigned char *key, size_t *out_len);
-unsigned char *xxtea_decrypt(const unsigned char *data, size_t len,
-                            const unsigned char *key, size_t *out_len);
+#include "xxtea.h"
 
 static uint64_t ns_now(void) {
 #if defined(_WIN32)
@@ -51,10 +46,10 @@ static int round_trip_once(size_t n, const uint8_t key[16]) {
     fill_rand(pt, n);
 
     size_t ct_len = 0, dec_len = 0;
-    unsigned char *ct = xxtea_encrypt(pt, n, key, &ct_len);
+    unsigned char *ct = xxtea_encrypt_raw(pt, n, key, &ct_len);
     if (!ct) { free(pt); return 0; }
 
-    unsigned char *dec = xxtea_decrypt(ct, ct_len, key, &dec_len);
+    unsigned char *dec = xxtea_decrypt_raw(ct, ct_len, key, &dec_len);
     if (!dec) { free(pt); free(ct); return 0; }
 
     int ok = (dec_len == n) && (memcmp(dec, pt, n) == 0);
@@ -73,13 +68,13 @@ static double avalanche_once(size_t n, const uint8_t key[16]) {
 
     size_t ct1_len = 0, ct2_len = 0;
 
-    unsigned char *ct1 = xxtea_encrypt(pt, n, key, &ct1_len);
+    unsigned char *ct1 = xxtea_encrypt_raw(pt, n, key, &ct1_len);
     if (!ct1) { free(pt); return -1.0; }
 
     // Flip a single bit (bit 0 of byte 0)
     pt[0] ^= 0x01;
 
-    unsigned char *ct2 = xxtea_encrypt(pt, n, key, &ct2_len);
+    unsigned char *ct2 = xxtea_encrypt_raw(pt, n, key, &ct2_len);
     if (!ct2) { free(pt); free(ct1); return -1.0; }
 
     // Compare up to the minimum length (normally equal for fixed n)
@@ -119,9 +114,9 @@ int main(void) {
             size_t ct_len = 0, dec_len = 0;
 
             uint64_t t0 = ns_now();
-            unsigned char *ct = xxtea_encrypt(pt, n, key, &ct_len);
+            unsigned char *ct = xxtea_encrypt_raw(pt, n, key, &ct_len);
             uint64_t t1 = ns_now();
-            unsigned char *dec = xxtea_decrypt(ct, ct_len, key, &dec_len);
+            unsigned char *dec = xxtea_decrypt_raw(ct, ct_len, key, &dec_len);
             uint64_t t2 = ns_now();
 
             enc_ns += (t1 - t0);

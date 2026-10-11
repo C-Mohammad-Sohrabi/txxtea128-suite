@@ -55,7 +55,7 @@ void xxtea128_decrypt_block(uint8_t out[16], const uint8_t in[16],
 // CTR mode: XORs data in place with the keystream.
 // nonce12 = 12-byte nonce; a 32-bit counter is appended per block.
 // Encrypt and decrypt are the same call.
-void xxtea128_ctr_xor(uint8_t *data, size_t len,
+int xxtea128_ctr_xor(uint8_t *data, size_t len,
                       const uint8_t key[16], const uint8_t nonce12[12]);
 ```
 
@@ -73,3 +73,9 @@ void xxtea128_ctr_xor(uint8_t *data, size_t len,
   (Encrypt-then-MAC + HMAC-SHA256).
 - **vs G:** G is the hardened redesign (32 rounds, whitening, feedback
   schedule) — A is the minimal baseline.
+
+CTR returns 1 on success, 0 on invalid arguments or counter exhaustion
+(more than 2^36 bytes), before changing data. Each call restarts the counter;
+do not split messages into repeated calls with the same key/nonce.
+The source now includes the shared `../../crypto_util.h` helper; preserve
+that relative path when copying a variant, or adapt the include explicitly.

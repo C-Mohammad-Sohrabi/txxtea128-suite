@@ -31,7 +31,7 @@ else
 endif
 
 CORE    := txxtea128.c txxtea_etm.c
-HDRS    := txxtea128.h txxtea_etm.h
+HDRS    := ../../crypto_util.h txxtea128.h txxtea_etm.h
 
 all: bench_etm demo_etm
 

@@ -1,4 +1,4 @@
-#ifdef _WIN32
+#ifdef _MSC_VER
 #pragma comment(lib, "xxtea.lib")
 #endif
 
@@ -7,22 +7,20 @@
 #include <xxtea.h>
 #include "base64.h"
 
-int main() {
+int main(void) {
     const char *text = "Hello World! 你好，中国！";
     const char *key = "1234567890";
-    size_t len;
-    unsigned char *encrypt_data = xxtea_encrypt(text, strlen(text), key, &len);
-    char * base64_data = base64_encode(encrypt_data, len);
-    printf("%s\n", base64_data);
-    char *decrypt_data = xxtea_decrypt(encrypt_data, len, key, &len);
-    if (strncmp(text, decrypt_data, len) == 0) {
-        printf("success!\n");
-    }
-    else {
-        printf("fail!\n");
-    }
-    free(encrypt_data);
-    free(decrypt_data);
-    free(base64_data);
-    return 0;
+    size_t ciphertext_len = 0, plaintext_len = 0;
+    unsigned char *ciphertext = xxtea_encrypt(text, strlen(text), key, &ciphertext_len);
+    if (!ciphertext) return 1;
+    char *encoded = base64_encode(ciphertext, ciphertext_len);
+    if (!encoded) { free(ciphertext); return 1; }
+    char *plaintext = xxtea_decrypt(ciphertext, ciphertext_len, key, &plaintext_len);
+    int ok = plaintext && plaintext_len == strlen(text) &&
+             memcmp(text, plaintext, plaintext_len) == 0;
+    printf("%s\n%s\n", encoded, ok ? "success!" : "fail!");
+    free(ciphertext);
+    free(plaintext);
+    free(encoded);
+    return ok ? 0 : 1;
 }

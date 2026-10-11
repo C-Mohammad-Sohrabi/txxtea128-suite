@@ -9,7 +9,7 @@ CFLAGS  ?= -O2 -Wall -Wextra
 
 TARGET := bench_g
 SRCS   := txxtea128_h.c bench_g.c
-HDRS   := txxtea128_h.h
+HDRS   := ../../crypto_util.h txxtea128_h.h
 
 all: $(TARGET)
 

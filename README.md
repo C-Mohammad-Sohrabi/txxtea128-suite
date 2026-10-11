@@ -68,8 +68,8 @@ int main() {
 
 The `variants/variant_A` … `variants/variant_G` folders reshape XXTEA
 into a fixed 128-bit block cipher, run it in CTR mode, and (D/E/F) wrap
-it in authenticated encryption. Each folder is a self-contained project
-with its own README, Makefile and benchmark. Build everything (or one)
+it in authenticated encryption. Each folder has its own README, Makefile and benchmark; the cipher sources
+also use the shared root `crypto_util.h`. Standalone tags bundle that helper. Build everything (or one)
 with:
 
 ```sh
@@ -99,19 +99,47 @@ is a self-contained snapshot you can check out and build on its own:
 | `v0.8.0` | + variant G (hardened cipher) |
 | `v0.9.0` | Aggregate build + Windows script + test menu |
 
-**Which variant should I use?**
+The letters describe different structures, not an established security
+ranking. B injects its tweak inside each MX update; C retains that path and
+adds a schedule; D/E/F use B, while G is a separate core.
 
-| Variant | What it is | Use it if… |
-|---|---|---|
-| A | XXTEA-128 fixed block cipher, CTR mode | you want the minimal baseline |
-| B | A + 16-byte tweak (weak final-XOR injection) | you need a tweak and accept its limits |
-| C | B + linear per-round key schedule | you want the strongest *original* design among A–C |
-| D | Encrypt-then-MAC, HMAC-SHA256, one-shot API | you want authenticated encryption fast |
-| E | Same as D, ctx-based, no malloc, caller nonce | you need a reusable zero-allocation API |
-| F | Same as E + Associated Data (AAD) binding | you want the most complete package (recommended) |
-| G | Hardened cipher: 32 rounds, whitening, feedback schedule | you want the strongest raw XXTEA-family core |
+## Verified implementation and API contracts (2026-10-10)
 
-> ⚠️ All variants are **experimental, unvetted ciphers** (XXTEA has
-> published cryptanalysis). For production, prefer a vetted primitive
-> (AES-CTR, ChaCha20-Poly1305) wrapped in the variant F construction.
+Run `make test` for the independent Python reference, frozen known-answer
+vectors, all seven variants, D/E interoperability and authenticated envelope
+negative tests. Run `make test-sanitize` to also run the C memory/UB checks.
+The tests require Python 3, a C compiler, and real OpenSSL libcrypto.
+`make -B all` rebuilds all demos; CMake builds the base library and example.
 
+The original `xxtea_encrypt` / `xxtea_decrypt` retain historical **string-key**
+semantics (stop at the first NUL, zero-pad to 16 bytes). Use the new
+`xxtea_encrypt_raw` / `xxtea_decrypt_raw` for exactly 16 binary key bytes.
+Old ciphertext produced by truncated binary keys must still be opened with
+the legacy API; changing to raw keys changes that ciphertext. No auto-detection
+is safe. All base API errors return NULL and set a supplied output length to 0.
+Empty messages are unsupported by the base envelope, but supported by D/E/F.
+
+All variant `*_ctr_xor` functions now return 1/0; callers must check the result.
+They reject more than 2^32 counter blocks (2^36 bytes) before touching data.
+Each call restarts the counter: this is a one-shot API, not a streaming update.
+A key/nonce pair must not be reused, including across D/E/F formats, because
+these wrappers derive the same encryption key. The limit is a counter-space
+bound, not a certified safe per-key data volume. Existing callers that ignore
+the return value compile, but must be updated to handle failures.
+
+D/E/F keep their wire formats. Output lengths are reset on failure. E/F
+require disjoint input/output/context/nonce/length storage; block APIs support
+exact in-place operation. `txxtea_etm_ctx_clear` and
+`txxtea_etm_aad_ctx_clear` erase reusable key material. E/F do not allocate
+message buffers themselves; OpenSSL can allocate internally. For integration,
+link just one copy of the identical B/D/E/F `txxtea128.c` core, not four.
+G is a separate research branch, not the core currently used in D/E/F.
+
+Passing these correctness tests is not a cryptanalytic security proof or
+constant-time audit. Native 32-bit, Windows, big-endian and embedded targets
+have not been executed in this review. Personal Word documents are excluded
+from version control.
+
+F constants now use the `TXXTEA_AAD_` prefix (for example
+`TXXTEA_AAD_HEADER_LEN`), so E and F headers can coexist without conflicting
+20/24-byte header macros. Update old F callers that used the generic macros.

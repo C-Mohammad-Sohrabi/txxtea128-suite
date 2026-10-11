@@ -32,6 +32,7 @@ int main(void) {
     size_t out_len = 0;
 
     if (!txxtea_etm_aad_seal_into(&ctx, pt, pt_len, aad, aad_len, nonce, out, sizeof(out), &out_len)) {
+        txxtea_etm_aad_ctx_clear(&ctx);
         printf("seal failed\n");
         return 1;
     }
@@ -42,17 +43,22 @@ int main(void) {
     size_t pt2_len = 0, aad2_len = 0;
 
     if (!txxtea_etm_aad_open_into(&ctx, out, out_len, pt2, sizeof(pt2), &pt2_len, aad2, sizeof(aad2), &aad2_len)) {
+        txxtea_etm_aad_ctx_clear(&ctx);
         printf("open failed\n");
         return 1;
     }
     printf("opened_txt=%.*s\n", (int)pt2_len, (char*)pt2);
     printf("aad_len=%zu  aad_first=%02x\n", aad2_len, aad2_len?aad2[0]:0);
 
+    int roundtrip_ok = pt2_len == pt_len && aad2_len == aad_len &&
+                       memcmp(pt2, pt, pt_len) == 0 && memcmp(aad2, aad, aad_len) == 0;
+
     // tamper AAD: flip one bit in aad area => should fail
-    out[TXXTEA_HEADER_LEN + 1] ^= 0x01;
+    out[TXXTEA_AAD_HEADER_LEN + 1] ^= 0x01;
     size_t pt3_len=0, aad3_len=0;
     int ok = txxtea_etm_aad_open_into(&ctx, out, out_len, pt2, sizeof(pt2), &pt3_len, aad2, sizeof(aad2), &aad3_len);
     printf("tamper_aad_open_ok=%d (expected 0)\n", ok);
 
-    return 0;
+    txxtea_etm_aad_ctx_clear(&ctx);
+    return roundtrip_ok && !ok ? 0 : 1;
 }

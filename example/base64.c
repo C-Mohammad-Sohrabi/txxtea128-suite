@@ -11,6 +11,7 @@
 \**********************************************************/
 
 #include <string.h>
+#include <stdint.h>
 #include "base64.h"
 
 static const char Base64EncodeChars[] = {
@@ -24,7 +25,7 @@ static const char Base64EncodeChars[] = {
     '4', '5', '6', '7', '8', '9', '+', '/'
 };
 
-static const char Base64DecodeChars[] = {
+static const signed char Base64DecodeChars[] = {
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1, -1, 63,
@@ -41,7 +42,7 @@ char * base64_encode(const unsigned char * data, size_t len) {
     size_t i, quot, rem;
     int c;
 
-    if (!len) return NULL;
+    if (!data || !len || len / 3 + (len % 3 != 0) > (SIZE_MAX - 1) / 4) return NULL;
 
     quot = len / 3;
     rem  = len % 3;
@@ -81,46 +82,43 @@ char * base64_encode(const unsigned char * data, size_t len) {
     return out;
 }
 
-unsigned char * base64_decode(const char * data, size_t * out_len) {
-    unsigned char *out, *pos;
-    const unsigned char *in = (const unsigned char *)data;
-    size_t i, len, quot, rem, paddings = 0;
-    int c;
-
+unsigned char * base64_decode(const char *data, size_t *out_len) {
+    size_t len, i, n = 0;
+    unsigned char *out;
+    if (!out_len) return NULL;
+    *out_len = 0;
+    if (!data) return NULL;
     len = strlen(data);
-    if (!len) return NULL;
-
-    rem = len % 4;
-    if (rem) return NULL; // invalid size
-
-    quot = len / 4;
-    if (data[len - 2] == '=')
-        paddings = 2;
-    else if (data[len - 1] == '=')
-        paddings = 1;
-    out = (unsigned char *)malloc(quot * 3 - paddings + 1);
+    if (!len || len % 4) return NULL;
+    out = (unsigned char *)malloc(len / 4 * 3 + 1);
     if (!out) return NULL;
-
-    pos = out;
-
-    for (i = 0; i < quot; i++) {
-        c  = Base64DecodeChars[(int)*in++] << 18;
-        c += Base64DecodeChars[(int)*in++] << 12;
-        *pos++ = (c & 0x00ff0000) >> 16;
-
-        if (*in != '=') {
-            c += Base64DecodeChars[(int)*in++] << 6;
-            *pos++ = (c & 0x0000ff00) >> 8;
-
-            if (*in != '=') {
-                c += Base64DecodeChars[(int)*in++];
-                *pos++ = c & 0x000000ff;
+    for (i = 0; i < len; i += 4) {
+        unsigned char a = (unsigned char)data[i], b = (unsigned char)data[i+1];
+        unsigned char c = (unsigned char)data[i+2], d = (unsigned char)data[i+3];
+        int x, y, z = 0, w = 0;
+        if (a >= 128 || b >= 128 || c >= 128 || d >= 128) goto invalid;
+        x = Base64DecodeChars[a]; y = Base64DecodeChars[b];
+        if (x < 0 || y < 0) goto invalid;
+        if (c == '=') {
+            if (d != '=' || i + 4 != len || (y & 15)) goto invalid;
+        } else {
+            z = Base64DecodeChars[c];
+            if (z < 0) goto invalid;
+            if (d == '=') {
+                if (i + 4 != len || (z & 3)) goto invalid;
+            } else {
+                w = Base64DecodeChars[d];
+                if (w < 0) goto invalid;
             }
         }
+        out[n++] = (unsigned char)((x << 2) | (y >> 4));
+        if (c != '=') out[n++] = (unsigned char)((y << 4) | (z >> 2));
+        if (d != '=') out[n++] = (unsigned char)((z << 6) | w);
     }
-
-    *pos = '\0';
-    *out_len = pos - out;
-
+    out[n] = 0;
+    *out_len = n;
     return out;
+invalid:
+    free(out);
+    return NULL;
 }

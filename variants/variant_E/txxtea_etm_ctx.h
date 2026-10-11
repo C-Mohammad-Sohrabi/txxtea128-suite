@@ -44,4 +44,10 @@ int txxtea_etm_open_into(const txxtea_etm_ctx *ctx,
                          uint8_t *pt, size_t pt_cap,
                          size_t *pt_len);
 
+// On failure, supplied output lengths are zero; allocating APIs also return NULL.
+// Input, output, context, nonce and length-variable storage must not overlap.
+// E/F caller nonces must be unique for a given master key across both formats.
+// Erase the reusable secret keys when the context is no longer needed.
+void txxtea_etm_ctx_clear(txxtea_etm_ctx *ctx);
+
 #endif

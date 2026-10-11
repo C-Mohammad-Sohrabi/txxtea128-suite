@@ -42,6 +42,7 @@ int main(void) {
     printf("opened_len=%zu\n", opened_len);
     printf("opened_txt=%.*s\n", (int)opened_len, (char*)opened);
 
+    int roundtrip_ok = opened_len == pt_len && memcmp(opened, pt, pt_len) == 0;
     free(opened);
 
     // tamper test: flip one bit in ciphertext (should fail)
@@ -53,5 +54,5 @@ int main(void) {
     if (ok) free(opened2);
 
     free(sealed);
-    return 0;
+    return roundtrip_ok && !ok ? 0 : 1;
 }

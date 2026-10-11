@@ -7,9 +7,9 @@
 
 // Hardened tweakable XXTEA-128 block cipher.
 //
-// Fixes the weak spots of variants A/B/C:
-//   1. Rounds raised from 19 to 32 (safety margin; 19 is the bare minimum
-//      from the original 6+52/n formula).
+// Experimental design changes relative to variants A/B/C:
+//   1. Rounds raised from 19 to 32 (intended additional margin, not proven;
+//      19 is the original 6+52/n value for n=4).
 //   2. Pre/post whitening so the key+tweak affect the data path before the
 //      first round and after the last round (not only via round-internal MX).
 //   3. A feedback key/tweak schedule: each round-key word is derived from an
@@ -31,9 +31,11 @@ void txxtea128_h_encrypt_block(uint8_t out[16], const uint8_t in[16],
 void txxtea128_h_decrypt_block(uint8_t out[16], const uint8_t in[16],
                                const uint8_t key[16], const uint8_t tweak[16]);
 
+// Returns 1 on success, 0 before modifying data on invalid pointers/length.
+// Max length: 2^36 bytes per call. Never reuse key+nonce; calls restart counter at 0.
 // CTR-xor using the tweakable block cipher:
 // tweak per-block = nonce12 || counter_le32, keystream = E_{key,tweak}(0^128)
-void txxtea128_h_ctr_xor(uint8_t *data, size_t len,
+int txxtea128_h_ctr_xor(uint8_t *data, size_t len,
                          const uint8_t key[16], const uint8_t nonce12[12]);
 
 #endif

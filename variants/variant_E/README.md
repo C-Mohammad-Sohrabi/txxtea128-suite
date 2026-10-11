@@ -1,13 +1,13 @@
 # variant_E — Authenticated encryption with a reusable context
 
 Same Encrypt-then-MAC construction as variant D, refactored for
-**embedded / zero-allocation use**:
+**caller-managed message buffers**:
 
 - `txxtea_etm_ctx` holds the two derived keys; `ctx_init` runs the HMAC
   KDF **once**, and you reuse the context for many messages
 - **caller supplies the nonce** (you control uniqueness — required for CTR)
 - `seal_into` / `open_into` write into **caller-provided buffers** — no
-  malloc anywhere on the hot path
+  direct buffer allocation in this wrapper (OpenSSL may allocate internally)
 - tag verified with a constant-time compare before decryption
 
 Output format: `"TX1" + version + nonce12 + ct_len_le32 + ciphertext + tag`.
@@ -69,7 +69,7 @@ int txxtea_etm_open_into(const txxtea_etm_ctx *ctx,
 ## How it differs from the other variants
 
 - **vs D:** same crypto, but D is one-shot with internal nonce and heap
-  allocations; E gives you nonce control and a reusable zero-malloc API.
+  allocations; E gives you nonce control and a reusable caller-buffer API.
 - **vs F:** F is E plus **Associated Data** (AAD) binding; if you need to
   authenticate headers/metadata, use F.
 - **vs A/B/C/G:** cipher-only variants with no authentication layer.

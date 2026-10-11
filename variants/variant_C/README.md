@@ -1,22 +1,21 @@
 # variant_C — Tweakable XXTEA-128 with a round-key schedule
 
-Variant B, improved: instead of using raw key words and XORing the tweak
-at the end of the mix term, a **per-round key schedule** (`make_rk`)
-derives four round keys from the key, the tweak, the round index and the
-running `sum`:
+Variant B with a **per-round key schedule** (`make_rk`). C keeps B's
+direct tweak XOR in MX and replaces the raw key words with round keys:
 
 ```c
-rk[i] = k[i] ^ rotl32(t[i], r + i) ^ mix;   // mix = sum + C1*(r+1) + per-index constant
+mix = sum + 0x7f4a7c15u * (r + 1); // modulo 2^32
+rk[i] = k[i] ^ rotl32(t[i], r + i) ^ mix ^ constant[i];
+// constant = {0, 0xa5a5a5a5, 0x3c3c3c3c, 0x5a5a5a5a}
 ```
 
-The tweak now enters the **key path** and is diffused by the data rounds —
-the first real structural improvement over A and B.
+For each fixed round this schedule is affine in key/tweak bits: XOR,
+rotation and round constants. Each word uses one key word and one tweak
+word. The core still runs 19 rounds on a 16-byte block.
 
-> ⚠️ **Security status:** experimental, not a vetted cipher. The schedule
-> is still **linear** (only XOR, rotate, constants), each `rk[i]` depends
-> on exactly one key word and one tweak word, and variant B's linear
-> tweak XOR is kept on top. Variant G is the hardened evolution (nonlinear
-> feedback schedule, whitening, 32 rounds).
+> **Research status:** this is a structural change, not evidence of
+> improved cryptanalytic security. Correctness tests compare C with a
+> separate specification; no security ranking is established.
 
 ## Files
 
@@ -55,7 +54,7 @@ void txxtea128_rs_encrypt_block(uint8_t out[16], const uint8_t in[16],
 void txxtea128_rs_decrypt_block(uint8_t out[16], const uint8_t in[16],
                                 const uint8_t key[16], const uint8_t tweak[16]);
 
-void txxtea128_rs_ctr_xor(uint8_t *data, size_t len,
+int txxtea128_rs_ctr_xor(uint8_t *data, size_t len,
                           const uint8_t key[16], const uint8_t nonce12[12]);
 ```
 
@@ -68,6 +67,12 @@ length. Encrypt and decrypt share the CTR function.
 - **vs B:** tweak only as a final XOR; no schedule.
 - **vs D/E/F:** those are authenticated-encryption wrappers around
   variant B's cipher (not C).
-- **vs G:** G addresses C's remaining weaknesses — nonlinear feedback
+- **vs G:** G changes the structure with a nonlinear feedback
   schedule whose round keys depend on *all* key+tweak words, pre/post
   whitening, and 32 rounds instead of 19.
+
+CTR returns 1 on success, 0 on invalid arguments or counter exhaustion
+(more than 2^36 bytes), before changing data. Each call restarts the counter;
+do not split messages into repeated calls with the same key/nonce.
+The source now includes the shared `../../crypto_util.h` helper; preserve
+that relative path when copying a variant, or adapt the include explicitly.

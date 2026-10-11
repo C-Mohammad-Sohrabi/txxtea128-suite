@@ -1,6 +1,7 @@
 // txxtea128_h.c
 #include "txxtea128_h.h"
 #include <string.h>
+#include "../../crypto_util.h"
 
 #define DELTA 0x9e3779b9u
 #define ROUNDS 32
@@ -69,7 +70,7 @@ static void make_round_keys(uint32_t rk[ROUNDS][4], const uint32_t k[4], const u
         }
     }
 
-    memset(s, 0, sizeof(s));
+    xxtea_secure_zero(s, sizeof(s));
 }
 
 static void encrypt_core(uint32_t v[4], const uint32_t rk[ROUNDS][4]) {
@@ -151,10 +152,11 @@ void txxtea128_h_encrypt_block(uint8_t out[16], const uint8_t in[16],
     encrypt_core(v, rk);
 
     for (int i = 0; i < 4; i++) store_le32(out + 4*i, v[i]);
+    xxtea_secure_zero(v, sizeof(v));
 
-    memset(rk, 0, sizeof(rk));
-    memset(k, 0, sizeof(k));
-    memset(t, 0, sizeof(t));
+    xxtea_secure_zero(rk, sizeof(rk));
+    xxtea_secure_zero(k, sizeof(k));
+    xxtea_secure_zero(t, sizeof(t));
 }
 
 void txxtea128_h_decrypt_block(uint8_t out[16], const uint8_t in[16],
@@ -172,14 +174,16 @@ void txxtea128_h_decrypt_block(uint8_t out[16], const uint8_t in[16],
     decrypt_core(v, rk);
 
     for (int i = 0; i < 4; i++) store_le32(out + 4*i, v[i]);
+    xxtea_secure_zero(v, sizeof(v));
 
-    memset(rk, 0, sizeof(rk));
-    memset(k, 0, sizeof(k));
-    memset(t, 0, sizeof(t));
+    xxtea_secure_zero(rk, sizeof(rk));
+    xxtea_secure_zero(k, sizeof(k));
+    xxtea_secure_zero(t, sizeof(t));
 }
 
-void txxtea128_h_ctr_xor(uint8_t *data, size_t len,
+int txxtea128_h_ctr_xor(uint8_t *data, size_t len,
                          const uint8_t key[16], const uint8_t nonce12[12]) {
+    if ((!data && len) || !key || !nonce12 || !xxtea_ctr_length_ok(len)) return 0;
     uint32_t counter = 0;
     uint8_t tweak[16];
     uint8_t ks[16];
@@ -201,6 +205,7 @@ void txxtea128_h_ctr_xor(uint8_t *data, size_t len,
         off += take;
     }
 
-    memset(tweak, 0, sizeof(tweak));
-    memset(ks, 0, sizeof(ks));
+    xxtea_secure_zero(tweak, sizeof(tweak));
+    xxtea_secure_zero(ks, sizeof(ks));
+    return 1;
 }

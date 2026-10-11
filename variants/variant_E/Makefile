@@ -32,7 +32,7 @@ endif
 
 TARGET := bench_etm_ctx
 SRCS   := txxtea128.c txxtea_etm_ctx.c bench_etm_ctx.c
-HDRS   := txxtea128.h txxtea_etm_ctx.h
+HDRS   := ../../crypto_util.h txxtea128.h txxtea_etm_ctx.h
 
 all: $(TARGET)
 

@@ -47,6 +47,15 @@ void * xxtea_encrypt(const void * data, size_t len, const void * key, size_t * o
  */
 void * xxtea_decrypt(const void * data, size_t len, const void * key, size_t * out_len);
 
+/* Legacy APIs above accept NUL-terminated string keys (at most 16 bytes).
+ * Binary APIs below consume EXACTLY 16 readable key bytes, including zeros.
+ * All APIs return NULL and set *out_len=0 on error; out_len must be non-NULL.
+ * Empty plaintext is unsupported; ciphertext must be >=8 and a multiple of 4.
+ * Binary APIs preserve the original XXTEA core and length-word envelope.
+ */
+void *xxtea_encrypt_raw(const void *data, size_t len, const void *key, size_t *out_len);
+void *xxtea_decrypt_raw(const void *data, size_t len, const void *key, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

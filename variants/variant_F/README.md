@@ -1,9 +1,9 @@
 # variant_F — Authenticated encryption with Associated Data (AAD)
 
 The most complete variant: Encrypt-then-MAC with **associated-data
-binding**, on top of variant E's context-based, zero-allocation API.
+binding**, on top of variant E's context-based, caller-buffer API (OpenSSL may allocate internally).
 
-- magic `"TX2"` (version 2 of the envelope), header includes `aad_len`
+- magic `"TX2"` (a distinct envelope identifier; the version byte is still 1), header includes `aad_len`
 - tag = `HMAC-SHA256(mac_key, header || aad || ciphertext)` — the
   associated data is **cryptographically bound** to the ciphertext, so
   headers, sender IDs, protocol metadata etc. cannot be swapped or altered
@@ -49,11 +49,11 @@ gcc -O2 -Wall -Wextra -Ic:\path\to\openssl\include -o demo_aad.exe txxtea128.c t
 
 int txxtea_etm_aad_ctx_init(txxtea_etm_aad_ctx *ctx, const uint8_t master_key[32]);
 
-// Seal; out_cap must be >= TXXTEA_HEADER_LEN + aad_len + pt_len + TXXTEA_TAG_LEN.
+// Seal; out_cap must be >= TXXTEA_AAD_HEADER_LEN + aad_len + pt_len + TXXTEA_AAD_TAG_LEN.
 int txxtea_etm_aad_seal_into(const txxtea_etm_aad_ctx *ctx,
                              const uint8_t *pt, size_t pt_len,
                              const uint8_t *aad, size_t aad_len,
-                             const uint8_t nonce12[TXXTEA_NONCE_LEN],
+                             const uint8_t nonce12[TXXTEA_AAD_NONCE_LEN],
                              uint8_t *out, size_t out_cap, size_t *out_len);
 
 // Verify tag (over header || aad || ct), then decrypt.
@@ -68,6 +68,5 @@ int txxtea_etm_aad_open_into(const txxtea_etm_aad_ctx *ctx,
 - **vs D:** D is one-shot, internal nonce, no AAD.
 - **vs E:** identical API shape; E lacks AAD binding.
 - **vs A/B/C/G:** cipher-only variants with no authentication layer.
-- **Recommended use:** if you want one variant to actually deploy with,
-  this is the strongest *complete package* in the family — the natural
-  next step is swapping its `txxtea128` core for AES-CTR or ChaCha20.
+- **Research scope:** F binds AAD and provides a caller-buffer API. It does
+  not establish that the underlying B cipher is secure, nor does it include G.

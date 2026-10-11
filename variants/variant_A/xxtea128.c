@@ -1,6 +1,7 @@
 // xxtea128.c
 #include "xxtea128.h"
 #include <string.h>
+#include "../../crypto_util.h"
 
 #define DELTA 0x9e3779b9u
 
@@ -64,6 +65,8 @@ void xxtea128_encrypt_block(uint8_t out[16], const uint8_t in[16], const uint8_t
     }
 
     for (int i = 0; i < 4; i++) store_le32(out + 4*i, v[i]);
+    xxtea_secure_zero(v, sizeof(v));
+    xxtea_secure_zero(k, sizeof(k));
 }
 
 void xxtea128_decrypt_block(uint8_t out[16], const uint8_t in[16], const uint8_t key[16]) {
@@ -104,9 +107,12 @@ void xxtea128_decrypt_block(uint8_t out[16], const uint8_t in[16], const uint8_t
     }
 
     for (int i = 0; i < 4; i++) store_le32(out + 4*i, v[i]);
+    xxtea_secure_zero(v, sizeof(v));
+    xxtea_secure_zero(k, sizeof(k));
 }
 
-void xxtea128_ctr_xor(uint8_t *data, size_t len, const uint8_t key[16], const uint8_t nonce12[12]) {
+int xxtea128_ctr_xor(uint8_t *data, size_t len, const uint8_t key[16], const uint8_t nonce12[12]) {
+    if ((!data && len) || !key || !nonce12 || !xxtea_ctr_length_ok(len)) return 0;
     uint32_t counter = 0;
     uint8_t inblk[16];
     uint8_t ks[16];
@@ -128,6 +134,7 @@ void xxtea128_ctr_xor(uint8_t *data, size_t len, const uint8_t key[16], const ui
     }
 
     // best-effort wipe
-    memset(inblk, 0, sizeof(inblk));
-    memset(ks, 0, sizeof(ks));
+    xxtea_secure_zero(inblk, sizeof(inblk));
+    xxtea_secure_zero(ks, sizeof(ks));
+    return 1;
 }

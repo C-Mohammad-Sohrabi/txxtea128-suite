@@ -28,16 +28,20 @@ int txxtea_etm_ctx_init(txxtea_etm_ctx *ctx, const uint8_t master_key[32]) {
     uint8_t tmp[32];
 
     if (!HMAC(EVP_sha256(), master_key, 32,
-              (const unsigned char*)"enc", 3, tmp, &outlen)) return 0;
-    if (outlen != 32) return 0;
+              (const unsigned char*)"enc", 3, tmp, &outlen)) goto key_fail;
+    if (outlen != 32) goto key_fail;
     memcpy(ctx->enc_key, tmp, 16);
 
     if (!HMAC(EVP_sha256(), master_key, 32,
-              (const unsigned char*)"mac", 3, ctx->mac_key, &outlen)) return 0;
-    if (outlen != 32) return 0;
+              (const unsigned char*)"mac", 3, ctx->mac_key, &outlen)) goto key_fail;
+    if (outlen != 32) goto key_fail;
 
     OPENSSL_cleanse(tmp, sizeof(tmp));
     return 1;
+key_fail:
+    OPENSSL_cleanse(tmp, sizeof(tmp));
+    OPENSSL_cleanse(ctx, sizeof(*ctx));
+    return 0;
 }
 
 static int hmac_sha256(uint8_t out[32], const uint8_t key[32],
@@ -52,9 +56,11 @@ int txxtea_etm_seal_into(const txxtea_etm_ctx *ctx,
                          const uint8_t nonce12[TXXTEA_NONCE_LEN],
                          uint8_t *out, size_t out_cap,
                          size_t *out_len) {
+    if (out_len) *out_len = 0;
     if (!ctx || (!pt && pt_len) || !nonce12 || !out || !out_len) return 0;
     if (pt_len > 0xFFFFFFFFu) return 0;
 
+    if (pt_len > SIZE_MAX - TXXTEA_HEADER_LEN - TXXTEA_TAG_LEN) return 0;
     const size_t total = TXXTEA_HEADER_LEN + pt_len + TXXTEA_TAG_LEN;
     if (out_cap < total) return 0;
 
@@ -86,6 +92,7 @@ int txxtea_etm_open_into(const txxtea_etm_ctx *ctx,
                          const uint8_t *in, size_t in_len,
                          uint8_t *pt, size_t pt_cap,
                          size_t *pt_len) {
+    if (pt_len) *pt_len = 0;
     if (!ctx || !in || !pt || !pt_len) return 0;
     if (in_len < TXXTEA_HEADER_LEN + TXXTEA_TAG_LEN) return 0;
 
@@ -97,8 +104,7 @@ int txxtea_etm_open_into(const txxtea_etm_ctx *ctx,
     uint32_t ct_len_u32 = load_le32(in + 4 + TXXTEA_NONCE_LEN);
     size_t ct_len = (size_t)ct_len_u32;
 
-    size_t expected = TXXTEA_HEADER_LEN + ct_len + TXXTEA_TAG_LEN;
-    if (expected != in_len) return 0;
+    if (ct_len != in_len - TXXTEA_HEADER_LEN - TXXTEA_TAG_LEN) return 0;
     if (pt_cap < ct_len) return 0;
 
     const uint8_t *ct  = in + TXXTEA_HEADER_LEN;
@@ -122,4 +128,8 @@ int txxtea_etm_open_into(const txxtea_etm_ctx *ctx,
 
     *pt_len = ct_len;
     return 1;
+}
+
+void txxtea_etm_ctx_clear(txxtea_etm_ctx *ctx) {
+    if (ctx) OPENSSL_cleanse(ctx, sizeof(*ctx));
 }

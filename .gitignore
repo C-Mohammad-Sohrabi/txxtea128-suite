@@ -30,3 +30,18 @@ demo_aad
 
 # local app metadata
 .freebuff/
+
+# Python test caches and document rendering intermediates
+__pycache__/
+/document/.qa/
+
+# Private documents and local release verification
+/document/
+/داکیومنت/
+/داکیومنت.zip
+/REVIEW_REPORT.md
+.release-work/
+.DS_Store
+.zcodeignore
+/build/
+*.o
